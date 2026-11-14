@@ -108,7 +108,7 @@ public class RunePillars : MonoBehaviour
             if (p.attuned) continue;
             if (Vector2.Distance(pp, p.basePos + Vector2.up * 0.6f) < 2.3f) Attune(p);
         }
-        if (InputHub.Pressed(KeyCode.T)) Teleport();
+        if (InputHub.Pressed(KeyCode.T) || TouchControls.TeleportPressed) Teleport();
     }
 
     void Attune(Pillar p)

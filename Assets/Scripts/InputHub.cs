@@ -62,6 +62,7 @@ public class InputHub : MonoBehaviour
 
     public static Vector2 Move()
     {
+        if (TouchControls.Move.sqrMagnitude > 0.001f) return TouchControls.Move;
         float x = 0f, y = 0f;
         if (Held(KeyCode.A) || Held(KeyCode.LeftArrow)) x -= 1f;
         if (Held(KeyCode.D) || Held(KeyCode.RightArrow)) x += 1f;

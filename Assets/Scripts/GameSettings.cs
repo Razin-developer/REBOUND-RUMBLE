@@ -20,6 +20,8 @@ public static class GameSettings
     public static string ProfileName = "PLAYER";
     public static int AvatarIndex = 0;
     public static int Costume = 0;
+    public static int Variant = 0;             // suit colour: 0 classic, 1 ice, 2 jade, 3 violet
+    public static int Suit { get { return Suits.Make(Costume, Variant); } }
     public static readonly string[] CostumeNames = { "RED JACKET", "BLACK & GOLD", "HOODIE" };
 
     public static Color Avatar { get { return AvatarColors[Mathf.Clamp(AvatarIndex, 0, AvatarColors.Length - 1)]; } }
@@ -46,6 +48,7 @@ public static class GameSettings
         ScreenShake = PlayerPrefs.GetInt("rr_shake", 1) == 1;
         DamageNumbers = PlayerPrefs.GetInt("rr_dmgnum", 1) == 1;
         Costume = Mathf.Clamp(PlayerPrefs.GetInt("rr_costume", 0), 0, CostumeNames.Length - 1);
+        Variant = Mathf.Clamp(PlayerPrefs.GetInt("rr_variant", 0), 0, Suits.Variants - 1);
         Apply();
     }
 
@@ -63,6 +66,7 @@ public static class GameSettings
         PlayerPrefs.SetInt("rr_shake", ScreenShake ? 1 : 0);
         PlayerPrefs.SetInt("rr_dmgnum", DamageNumbers ? 1 : 0);
         PlayerPrefs.SetInt("rr_costume", Costume);
+        PlayerPrefs.SetInt("rr_variant", Variant);
         PlayerPrefs.Save();
     }
 

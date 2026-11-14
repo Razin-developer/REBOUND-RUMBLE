@@ -9,7 +9,11 @@ public static class PerfBoot
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
     static void Boot()
     {
+#if UNITY_WEBGL && !UNITY_EDITOR
+        Application.targetFrameRate = Application.isMobilePlatform ? 60 : -1;
+#else
         Application.targetFrameRate = 60;
+#endif
         QualitySettings.vSyncCount = 0;
         QualitySettings.shadows = ShadowQuality.Disable;
         QualitySettings.antiAliasing = 0;

@@ -177,7 +177,7 @@ public class TenRing : MonoBehaviour
         rb.simulated = true;
         col.enabled = true;
         rb.position = transform.position;
-        rb.linearVelocity = dir.normalized * speed;
+        rb.linearVelocity = dir.normalized * speed * Boosts.RingSpeed;
         lastGood = rb.position;
         trail.Clear();
         trail.emitting = true;
@@ -211,7 +211,7 @@ public class TenRing : MonoBehaviour
     void LateUpdate()
     {
         if (owner == null) return;
-        bool show = GameState.Mode == GameMode.Playing;
+        bool show = GameState.Mode == GameMode.Playing && !Coop.IsGuest;
         vsr.enabled = show; gsr.enabled = show;
 
         if (State == RingState.Orbit)
@@ -310,7 +310,7 @@ public class TenRing : MonoBehaviour
             Vfx.Shockwave(p, Amber, 0.9f, 0.28f);
             Fx.Slash(p, rb.linearVelocity, Gold, 0.7f, 0.18f);
             Sfx.Play("ring_clang", 0.8f, 0.9f + Random.value * 0.4f);
-            e.Hit(damage, rb.linearVelocity);
+            e.Hit(damage * Boosts.Damage, rb.linearVelocity);
             if (e == target) target = null;   // job done - pick the next nearest below
             if (State == RingState.Flying)
                 rb.linearVelocity = Rot(rb.linearVelocity, Random.Range(-40f, 40f)); // ricochet off the victim
@@ -362,7 +362,7 @@ public class TenRing : MonoBehaviour
             }
 
             // ---- time to go home? ----
-            if (hits >= maxHits || bounces >= maxBounces || t > maxFlight || noTargetTime > 0.9f)
+            if (hits >= maxHits + Boosts.ExtraHits || bounces >= maxBounces || t > maxFlight || noTargetTime > 0.9f)
                 StartReturn();
         }
         else // Returning: boomerang arc back to the owner

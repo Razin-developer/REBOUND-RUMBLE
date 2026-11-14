@@ -33,11 +33,8 @@ public class PlayerMovement : MonoBehaviour
     void Awake()
     {
         anim = GetComponent<Animator>();
-        // keep the scale authored on the Player prefab/scene (e.g. X 1.25 = wider sprite) and apply the global size factor on top;
-        // if nobody widened it in the editor yet (x == y), widen it here so the result is the same either way
-        Vector3 ls = transform.localScale;
-        if (Mathf.Approximately(ls.x, ls.y)) ls.x *= 1.25f;
-        transform.localScale = new Vector3(ls.x * GS.S, ls.y * GS.S, 1f);
+        // at runtime the player is exactly 1.25 wide (X); height keeps the global size factor
+        transform.localScale = new Vector3(1.25f, GS.S, 1f);
 
         // Switch off the Cainos controller so two scripts don't fight over velocity.
         var cainos = GetComponent<Cainos.PixelArtTopDown_Basic.TopDownCharacterController>();
@@ -71,7 +68,7 @@ public class PlayerMovement : MonoBehaviour
     void FixedUpdate()
     {
         knock = Vector2.Lerp(knock, Vector2.zero, 10f * Time.fixedDeltaTime);
-        rb.linearVelocity = (input.normalized * speed * (Guard.Active ? Guard.MoveMul : 1f) + knock) * GS.S;
+        rb.linearVelocity = (input.normalized * speed * Boosts.Move * Coop.GuestMoveMul * (Guard.Active ? Guard.MoveMul : 1f) + knock) * GS.S;
 
         // Safety net: never leave the arena, even if a collider is missed.
         if (Arena.Instance != null)

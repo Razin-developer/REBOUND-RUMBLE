@@ -384,6 +384,20 @@ public class Tutorial : MonoBehaviour
 
     static bool KeyHeld(string k)
     {
+        if (TouchControls.Active)
+        {
+            Vector2 m = TouchControls.Move;
+            switch (k)
+            {
+                case "W": return m.y > 0.3f;
+                case "S": return m.y < -0.3f;
+                case "A": return m.x < -0.3f;
+                case "D": return m.x > 0.3f;
+                case "SPACE": case "HOLD SPACE": case "LMB": case "HOLD LMB": return TouchControls.ThrowHeld;
+                case "E": case "HOLD E": return TouchControls.GuardHeld;
+                case "Q": case "RMB": return TouchControls.VolleyHeld;
+            }
+        }
         switch (k)
         {
             case "W": return InputHub.Held(KeyCode.W) || InputHub.Held(KeyCode.UpArrow);
@@ -590,6 +604,10 @@ public class Tutorial : MonoBehaviour
 
     static string KeyLabel(string k)
     {
+        if (TouchControls.Active)
+        {
+            switch (k) { case "W": return "UP"; case "A": return "LEFT"; case "S": return "DOWN"; case "D": return "RIGHT"; case "SPACE": case "LMB": return "THROW"; case "HOLD SPACE": case "HOLD LMB": return "HOLD THROW"; case "E": return "GUARD"; case "HOLD E": return "HOLD GUARD"; case "Q": case "RMB": return "VOLLEY"; case "T": return "TELEPORT"; }
+        }
         return k == "LMB" ? "LEFT CLICK" : (k == "RMB" ? "RIGHT CLICK" : (k == "HOLD LMB" ? "HOLD CLICK" : k));
     }
 }

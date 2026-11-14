@@ -1,0 +1,19 @@
+# Render Blueprint: New + > Blueprint > pick this repo. Render reads this file and sets everything up.
+services:
+  - type: web
+    name: rebound-rumble-multiplayer
+    runtime: node
+    plan: free
+    rootDir: multiplayer-server
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /
+    envVars:
+      - key: NODE_VERSION
+        value: 20
+      - key: JWT_SECRET
+        sync: false        # you paste the SAME value your Vercel API uses
+      - key: MONGODB_URI
+        sync: false        # you paste the SAME Atlas connection string your Vercel API uses
+      - key: DB_NAME
+        value: rebound_rumble

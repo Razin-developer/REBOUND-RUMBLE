@@ -49,19 +49,19 @@ public class RingLauncher : MonoBehaviour
             foreach (var r in TenRing.All) if (r != null && r.State != TenRing.RingState.Orbit) r.ForceOrbit();
             return;
         }
-        if (!GameState.Active || Time.time < nextThrow) return;
+        if (!GameState.Active || Time.time < nextThrow || Coop.IsGuest) return;
 
-        if (InputHub.RightHeld || InputHub.Held(KeyCode.Q))
+        if ((InputHub.RightHeld && !TouchControls.Active) || InputHub.Held(KeyCode.Q) || TouchControls.VolleyHeld)
         {
             if (VolleyReady) Volley();
             return;
         }
 
-        if (!(InputHub.MouseHeld || InputHub.Held(KeyCode.Space))) return;
+        if (!((InputHub.MouseHeld && !TouchControls.Active) || InputHub.Held(KeyCode.Space) || TouchControls.ThrowHeld)) return;
         TenRing ring = TenRing.FirstReady();
         if (ring == null) return;
 
-        nextThrow = Time.time + throwDelay;
+        nextThrow = Time.time + throwDelay * Boosts.FireDelay;
         Vector2 dir = ChooseDirection(0f);
         PlayerVisual.Throw(dir);
         StartCoroutine(ReleaseSingle(ring, dir));
@@ -73,6 +73,7 @@ public class RingLauncher : MonoBehaviour
         if (ring == null || !GameState.Active || ring.State != TenRing.RingState.Orbit) yield break;
         ring.Launch(dir);
         Throws++;
+        Coop.NoteThrow();
         Sfx.Play("ring_throw", 0.7f, 0.9f + Random.value * 0.3f);
     }
 
@@ -83,8 +84,9 @@ public class RingLauncher : MonoBehaviour
             if (r != null && r.State == TenRing.RingState.Orbit && rings.Count < VolleySize) rings.Add(r);
         if (rings.Count < VolleySize) return;
 
-        volleyReadyAt = Time.time + VolleyCooldown;
+        volleyReadyAt = Time.time + VolleyCooldown * Boosts.VolleyCooldownMul;
         Volleys++;
+        Coop.NoteThrow();
         nextThrow = Time.time + 0.7f;
         Vector2 baseDir = ChooseDirection(0f);
         PlayerVisual.Throw(baseDir);

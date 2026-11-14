@@ -37,18 +37,29 @@ public class EnemySpawner : MonoBehaviour
         offscreenFails = 0;
     }
 
+    float nextFar;
+
     void Update()
     {
         if (player == null) return;
         Nav.Refresh(player.position);
-        if (!GameState.Active || Tutorial.Active) return;   // the practice level places its own enemies
+        if (Time.time >= nextFar)       // enemies left far behind on the huge map are recycled so the cap is never wasted
+        {
+            nextFar = Time.time + 1f;
+            for (int i = Enemy.All.Count - 1; i >= 0; i--)
+            {
+                var e = Enemy.All[i];
+                if (e != null && e != Enemy.Boss && !e.passive && ((Vector2)e.transform.position - (Vector2)player.position).sqrMagnitude > 55f * 55f && Coop.FarFromAvatar(e.transform.position, 55f)) Destroy(e.gameObject);
+            }
+        }
+        if (!GameState.Active || Tutorial.Active || Coop.IsGuest) return;   // the practice level places its own enemies; a co-op guest only draws the host's enemies
 
         GameState.RunTime += Time.deltaTime;
         if (Time.time < nextSpawn) return;
 
         float t = GameState.RunTime;
-        int cap = Mathf.Min(MaxEnemies, 5 + (int)(t / 15f));
-        float interval = Mathf.Max(0.7f, 2.2f - t * 0.01f);
+        int cap = Mathf.Min(MaxEnemies + Coop.ExtraCap, 5 + (Coop.HasAvatar ? 4 : 0) + (int)(t / 15f) + GameState.Kills / 40 + (Difficulty.Frenzy ? 3 : 0));
+        float interval = Mathf.Max(0.45f, (2.2f - t * 0.01f) / Difficulty.SpawnRate);
         nextSpawn = Time.time + interval * Random.Range(0.8f, 1.2f);
         if (Enemy.All.Count >= cap) return;
         SpawnGroup(t);
@@ -75,27 +86,27 @@ public class EnemySpawner : MonoBehaviour
 
     void SpawnGroup(float t)
     {
-        Vector2 pos, fallback;
-        bool ok = Nav.TryGetSpawnPoint(player.position, 7f, out pos, out fallback);
+        Vector2 pos, fallback; string lay;
+        bool ok = Nav.TryGetSpawnSpot(Coop.SpawnCenter(player.position), 6f, out pos, out lay, out fallback);
         if (!ok)
         {
             // only spawn on screen if nothing off-screen has been available for a while
             offscreenFails++;
             if (offscreenFails < 4 || fallback == Vector2.zero) return;
-            pos = fallback;
+            pos = fallback; lay = GameState.ActorLayer;
         }
         offscreenFails = 0;
 
-        float hpScale = 1f + t / 180f;
-        float speedScale = Mathf.Min(1.5f, 1f + t / 600f);
+        float hpScale = (1f + t / 180f) * Difficulty.KillHp;
+        float speedScale = Mathf.Min(1.5f, 1f + t / 600f) * Difficulty.KillSpeed;
         EnemyKind kind = PickKind(t);
         int n = kind == EnemyKind.Ant ? Random.Range(3, 6) : 1;
-        n = Mathf.Min(n, MaxEnemies - Enemy.All.Count);
+        n = Mathf.Min(n, MaxEnemies + Coop.ExtraCap - Enemy.All.Count);
         if (n <= 0) return;
         for (int i = 0; i < n; i++)
         {
             Vector2 p = pos + Random.insideUnitCircle * (n > 1 ? 0.7f : 0f);
-            Enemy.Spawn(kind, p, hpScale, speedScale);
+            Enemy.Spawn(kind, p, hpScale, speedScale, lay);
         }
     }
 }

@@ -16,6 +16,8 @@ public static class Nav
     static readonly List<Tilemap> wallMaps = new List<Tilemap>();
     static readonly Dictionary<Vector2Int, int> dist = new Dictionary<Vector2Int, int>();
     static readonly List<Vector2> spawnCells = new List<Vector2>();
+    struct Spot { public Vector2 pos; public string layer; }
+    static readonly List<Spot> upperCells = new List<Spot>();     // open floor on the raised levels (Layer 2 / Layer 3)
     static readonly RaycastHit2D[] hits = new RaycastHit2D[16];
     static readonly Vector2Int[] Dir4 = { new Vector2Int(1, 0), new Vector2Int(-1, 0), new Vector2Int(0, 1), new Vector2Int(0, -1) };
     static readonly Vector2Int[] Dir8 =
@@ -35,7 +37,7 @@ public static class Nav
     static void ResetStatics()
     {
         ground = stone = wall = null; allMaps = null;
-        walkable.Clear(); dist.Clear(); spawnCells.Clear(); stairs.Clear();
+        walkable.Clear(); dist.Clear(); spawnCells.Clear(); upperCells.Clear(); stairs.Clear();
         lastPlayerCell = new Vector2Int(int.MinValue, 0);
     }
 
@@ -99,7 +101,8 @@ public static class Nav
     /// <summary>Call once after the scene loads (player position = flood-fill start). Covers ALL levels, minus walls and solid props.</summary>
     public static void Init(Vector2 playerPos)
     {
-        walkable.Clear(); dist.Clear(); spawnCells.Clear(); groundMaps.Clear(); wallMaps.Clear(); stairs.Clear();
+        Physics2D.SyncTransforms();
+        walkable.Clear(); dist.Clear(); spawnCells.Clear(); upperCells.Clear(); groundMaps.Clear(); wallMaps.Clear(); stairs.Clear();
         InitialStart = playerPos;
         ground = Find("Layer 1 - Grass");
         stone = Find("Layer 1 - Stone Ground");
@@ -137,6 +140,26 @@ public static class Nav
         spawnCells.Sort((a, b) => a.x != b.x ? a.x.CompareTo(b.x) : a.y.CompareTo(b.y));   // same order every run
         BuildAvoid();
 
+        // raised floors: every floor tile of Layer 2 / Layer 3 that is not a wall
+        foreach (var t in groundMaps)
+        {
+            if (!t.name.StartsWith("Layer 2") && !t.name.StartsWith("Layer 3")) continue;
+            var trr = t.GetComponent<TilemapRenderer>();
+            string ln = trr != null ? trr.sortingLayerName : t.name.Substring(0, 7);
+            if (LayerMask.NameToLayer(ln) < 0) continue;
+            var b = t.cellBounds;
+            for (int x = b.xMin; x < b.xMax; x++)
+                for (int y = b.yMin; y < b.yMax; y++)
+                {
+                    var tc = new Vector3Int(x, y, 0);
+                    if (!t.HasTile(tc)) continue;
+                    Vector3 wp = t.GetCellCenterWorld(tc);
+                    Vector2Int gc = CellOf(wp);
+                    if (IsWall(gc)) continue;
+                    upperCells.Add(new Spot { pos = wp, layer = ln });
+                }
+        }
+
         // stairs: a flood-fill field per staircase so enemies on another level can walk to it
         foreach (var st in Object.FindObjectsByType<Cainos.PixelArtTopDown_Basic.StairsLayerTrigger>())
         {
@@ -145,7 +168,7 @@ public static class Nav
             var field = new Dictionary<Vector2Int, int>();
             Vector2Int seed = CellOf(sp), s2;
             if (walkable.Contains(seed)) s2 = seed; else if (!NearestIn(seed, 4, false, out s2)) continue;
-            Flood(s2, field);
+            Flood(s2, field, 45);
             stairs.Add(new Stair { pos = sp, upper = LayerMask.NameToLayer(st.layerUpper), lower = LayerMask.NameToLayer(st.layerLower), field = field });
         }
     }
@@ -174,10 +197,10 @@ public static class Nav
         dist.Clear();
         Vector2Int seed = pc;
         if (!walkable.Contains(seed) && !NearestIn(pc, 4, false, out seed)) return;
-        Flood(seed, dist);
+        Flood(seed, dist, 70);
     }
 
-    static void Flood(Vector2Int seed, Dictionary<Vector2Int, int> d)
+    static void Flood(Vector2Int seed, Dictionary<Vector2Int, int> d, int limit = 0)
     {
         var q = new Queue<Vector2Int>();
         d[seed] = 0; q.Enqueue(seed);
@@ -185,6 +208,7 @@ public static class Nav
         {
             var c = q.Dequeue();
             int dc = d[c];
+            if (limit > 0 && dc >= limit) continue;
             foreach (var dir in Dir8)
             {
                 var n = c + dir;
@@ -288,20 +312,64 @@ public static class Nav
     public static bool TryFreeCellNear(Vector2 target, float minD, float maxD, out Vector2 point)
     {
         point = Vector2.zero;
-        if (!Ready) return false;
+        if (!Ready || spawnCells.Count == 0) return false;
         var f = new ContactFilter2D(); f.useTriggers = false; f.useLayerMask = false;
         var buf = new Collider2D[4];
-        var good = new List<Vector2>();
-        foreach (var p in spawnCells)
+        for (int i = 0; i < 400; i++)            // random sampling: the map is huge, never scan every cell
         {
+            Vector2 p = spawnCells[Random.Range(0, spawnCells.Count)];
             float d = Vector2.Distance(p, target);
             if (d < minD || d > maxD) continue;
             if (Physics2D.OverlapCircle(p, 0.7f, f, buf) > 0) continue;
-            good.Add(p);
+            point = p; return true;
         }
-        if (good.Count == 0) return false;
-        point = good[Random.Range(0, good.Count)];
-        return true;
+        return false;
+    }
+
+    /// <summary>A free spot for pickups: main floor or a raised floor. `layer` is the level's sorting/physics layer name.</summary>
+    public static bool TryFreeSpotNear(Vector2 target, float minD, float maxD, out Vector2 point, out string layer)
+    {
+        layer = GameState.ActorLayer; point = Vector2.zero;
+        if (!Ready) return false;
+        var f = new ContactFilter2D(); f.useTriggers = false;
+        var buf = new Collider2D[4];
+        for (int i = 0; i < 80; i++)
+        {
+            bool up = upperCells.Count > 0 && Random.value < 0.4f;
+            Vector2 p; string ln = GameState.ActorLayer;
+            if (up) { var s = upperCells[Random.Range(0, upperCells.Count)]; p = s.pos; ln = s.layer; }
+            else p = spawnCells[Random.Range(0, spawnCells.Count)];
+            float d = Vector2.Distance(p, target);
+            if (d < minD || d > maxD) continue;
+            f.useLayerMask = up; if (up) f.layerMask = 1 << LayerMask.NameToLayer(ln);
+            if (Physics2D.OverlapCircle(p, 0.7f, f, buf) > 0) continue;
+            point = p; layer = ln; return true;
+        }
+        return false;
+    }
+
+    /// <summary>Spawn spot for enemies: anywhere off-screen on the main floor or the raised floors.</summary>
+    public static bool TryGetSpawnSpot(Vector2 from, float minDist, out Vector2 point, out string layer, out Vector2 onScreenFallback, float maxDist = 26f)
+    {
+        point = Vector2.zero; layer = GameState.ActorLayer; onScreenFallback = Vector2.zero;
+        if (!Ready) return false;
+        var f = new ContactFilter2D(); f.useTriggers = false;
+        var buf = new Collider2D[4];
+        Rect view = CameraRect(1.5f);
+        for (int i = 0; i < 120; i++)
+        {
+            bool up = upperCells.Count > 0 && Random.value < 0.35f;
+            Vector2 p; string ln = GameState.ActorLayer;
+            if (up) { var s = upperCells[Random.Range(0, upperCells.Count)]; p = s.pos; ln = s.layer; }
+            else p = spawnCells[Random.Range(0, spawnCells.Count)];
+            if ((p - from).sqrMagnitude < minDist * minDist || (p - from).sqrMagnitude > maxDist * maxDist) continue;
+            f.useLayerMask = up; if (up) f.layerMask = 1 << LayerMask.NameToLayer(ln);
+            if (Physics2D.OverlapCircle(p, 0.45f, f, buf) > 0) continue;
+            if (view.width > 0f && view.Contains(p)) { onScreenFallback = p; continue; }
+            point = p; layer = ln;
+            return true;
+        }
+        return false;
     }
 
     /// <summary>The free walkable cell farthest from `from` (used for the exit portal).</summary>
@@ -420,7 +488,7 @@ public static class Nav
     /// A free walkable spot away from `from` and OUTSIDE the camera view, so enemies never pop in on screen.
     /// Returns false if none was found (point stays zero); `onScreenFallback` is a valid but visible spot, if any.
     /// </summary>
-    public static bool TryGetSpawnPoint(Vector2 from, float minDist, out Vector2 point, out Vector2 onScreenFallback)
+    public static bool TryGetSpawnPoint(Vector2 from, float minDist, out Vector2 point, out Vector2 onScreenFallback, float maxDist = 40f)
     {
         point = Vector2.zero;
         onScreenFallback = Vector2.zero;
@@ -430,10 +498,10 @@ public static class Nav
         f.useLayerMask = false;
         var buf = new Collider2D[4];
         Rect view = CameraRect(1.5f);
-        for (int i = 0; i < 60; i++)
+        for (int i = 0; i < 200; i++)
         {
             Vector2 p = spawnCells[Random.Range(0, spawnCells.Count)];
-            if ((p - from).sqrMagnitude < minDist * minDist) continue;
+            if ((p - from).sqrMagnitude < minDist * minDist || (p - from).sqrMagnitude > maxDist * maxDist) continue;
             if (Physics2D.OverlapCircle(p, 0.45f, f, buf) > 0) continue;
             if (view.width > 0f && view.Contains(p)) { onScreenFallback = p; continue; }
             point = p;

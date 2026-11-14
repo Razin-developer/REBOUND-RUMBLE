@@ -45,9 +45,23 @@ public class PlayerHealth : MonoBehaviour
 
     public void Invuln(float seconds) { invulnUntil = Mathf.Max(invulnUntil, Time.time + seconds); }
 
+    /// <summary>Co-op guest: the host decided we were hit. Same knockback and effects, hearts come from the host.</summary>
+    public void RemoteHurt(Vector2 away)
+    {
+        invulnUntil = Time.time + 1.0f;
+        var pm = GetComponent<PlayerMovement>();
+        if (pm != null) pm.Push(away.normalized * 9f);
+        Vfx.Burst(transform.position + Vector3.up * 0.4f, new Color(1f, 0.25f, 0.25f), 16, 4.5f, 0.18f, 0.45f);
+        Fx.Blood(transform.position + Vector3.up * 0.4f, away, 12, false);
+        Sfx.Play("hurt", 0.9f, 1f);
+        CameraRig.Shake(0.3f, 0.25f);
+    }
+
     public void Damage(int amount, Vector2 away)
     {
+        if (Coop.IsGuest) return;
         if (!GameState.Active || Time.time < invulnUntil) return;
+        if (Boosts.Aegis) { Vfx.Burst(transform.position + Vector3.up * 0.4f, new Color(0.6f, 0.75f, 1f), 6, 3f, 0.1f, 0.3f); invulnUntil = Time.time + 0.2f; return; }
         if (Guard.Active)
         {
             Guard.Blocked(transform.position + Vector3.up * 0.4f);
@@ -88,7 +102,8 @@ public class PlayerHealth : MonoBehaviour
         foreach (var s in allSr) if (s != null && s != sr) s.color = new Color(1f, 1f, 1f, alpha);
 
         if (GameState.Over) { sr.enabled = true; sr.color = new Color(0.4f, 0.4f, 0.45f); return; }
-        sr.color = new Color(1f, 1f, 1f, alpha);
+        Color tint = Suits.Tint(GameSettings.Suit);
+        sr.color = new Color(tint.r, tint.g, tint.b, alpha);
         sr.enabled = !(Time.time < invulnUntil && alpha >= 1f) || Mathf.FloorToInt(Time.time * 14f) % 2 == 0; // blink
     }
 }

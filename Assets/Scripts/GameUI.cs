@@ -1,12 +1,13 @@
+using System.Collections.Generic;
 using UnityEngine;
 
 /// <summary>
 /// All UI for REBOUND RUMBLE (IMGUI, auto-installed): sign-in, main menu, leaderboard, settings, controls (Tab),
 /// pause (Esc), the death screen, and the in-game HUD.
 /// </summary>
-public class GameUI : MonoBehaviour
+public partial class GameUI : MonoBehaviour
 {
-    enum Page { None, Splash, Loading, Story, Auth, Main, Leaderboard, Settings, Controls, Pause, GameOver }
+    enum Page { None, Splash, Loading, Story, Auth, Main, Leaderboard, Settings, Controls, Pause, GameOver, Coop }
     Page page = Page.Main;
     Page settingsReturn = Page.Main;
     int settingsTab;
@@ -45,6 +46,7 @@ public class GameUI : MonoBehaviour
 
         if (page != lastPage) { lastPage = page; pageStart = Time.unscaledTime; }
         UpdateFlow();
+        CoopTick();
         if (page == Page.Auth && Net.State != AccountState.LoggedOut) { pass = ""; AfterAuth(); }
         if (page == Page.Main && Net.State == AccountState.LoggedOut && GameState.Mode == GameMode.Menu) page = Page.Auth;
 
@@ -72,6 +74,7 @@ public class GameUI : MonoBehaviour
         {
             if (page == Page.Settings) { GameSettings.Save(); page = settingsReturn; }
             else if (page == Page.Leaderboard) page = Page.Main;
+            else if (page == Page.Coop) LeaveCoopPage();
         }
     }
 
@@ -139,11 +142,28 @@ public class GameUI : MonoBehaviour
     {
         var oc = st.normal.textColor; var oa = st.alignment; var os = st.fontSize;
         st.alignment = a; if (size > 0) st.fontSize = size;
-        st.normal.textColor = new Color(0, 0, 0, 0.8f * c.a);
-        GUI.Label(new Rect(r.x + 2, r.y + 2, r.width, r.height), s, st);
-        st.normal.textColor = c;
+        var hv = st.hover.textColor; var ac = st.active.textColor;
+        // drop shadow only on big text: on small pixel text the offset copy smears the letters and makes them unreadable
+        int fs = st.fontSize;
+        if (fs >= 15)
+        {
+            float off = fs >= 28 ? 2f : 1f;
+            st.normal.textColor = new Color(0, 0, 0, 0.8f * c.a); NoHover(st);
+            GUI.Label(new Rect(r.x + off, r.y + off, r.width, r.height), s, st);
+        }
+        st.normal.textColor = c; NoHover(st);
         GUI.Label(r, s, st);
-        st.normal.textColor = oc; st.alignment = oa; st.fontSize = os;
+        st.normal.textColor = oc; st.alignment = oa; st.fontSize = os; st.hover.textColor = hv; st.active.textColor = ac;
+    }
+
+    // IMGUI draws a label with its HOVER colour while the mouse is over its rectangle, so text faded to alpha 0
+    // (the splash "RAZIN") popped back into view on hover. Every state of a text style now uses the same colour.
+    void NoHover(GUIStyle st)
+    {
+        if (st == null) return;
+        Color n = st.normal.textColor;
+        st.hover.textColor = n; st.active.textColor = n; st.focused.textColor = n;
+        st.onNormal.textColor = n; st.onHover.textColor = n; st.onActive.textColor = n; st.onFocused.textColor = n;
     }
 
     bool Button(Rect r, string s, GUIStyle st = null)
@@ -153,13 +173,27 @@ public class GameUI : MonoBehaviour
         return click;
     }
 
+    // text input: normal IMGUI fields, but on phone browsers (no IMGUI keyboard) a button that opens the browser prompt
+    string Field(Rect r, string val, int max, bool secret, string title)
+    {
+        if (!WebBridge.IsMobileWeb)
+            return secret ? GUI.PasswordField(r, val, '*', max, field) : GUI.TextField(r, val, max, field);
+        string shown = secret ? new string('*', val.Length) : val;
+        if (GUI.Button(r, shown.Length == 0 ? "TAP TO TYPE" : shown, field))
+        {
+            string res = WebBridge.Prompt(title, val);
+            if (res != null) val = res.Length > max ? res.Substring(0, max) : res;
+        }
+        return val;
+    }
+
     // ------------------------------------------------------------------ OnGUI
     void OnGUI()
     {
         EnsureStyles();
-        scale = Screen.height / 720f;
+        scale = Mathf.Min(Screen.height / 720f, Screen.width / 1000f);
         GUI.matrix = Matrix4x4.Scale(new Vector3(scale, scale, 1f));
-        float W = Screen.width / scale, H = 720f;
+        float W = Screen.width / scale, H = Screen.height / scale;
 
         if (GameState.Mode == GameMode.Playing) DrawHud(W, H);
         if (GameSettings.ShowFps)
@@ -178,7 +212,9 @@ public class GameUI : MonoBehaviour
             case Page.Controls: DrawControls(W, H); break;
             case Page.Pause: DrawPause(W, H); break;
             case Page.GameOver: DrawGameOver(W, H); break;
+            case Page.Coop: DrawCoop(W, H); break;
         }
+        if (page == Page.Main || page == Page.Coop) DrawInviteToast(W, H);
         DrawTransit(W, H);
     }
 
@@ -211,6 +247,10 @@ public class GameUI : MonoBehaviour
         Text(new Rect(W / 2 - 150, 12, 300, 30), string.Format("{0:00}:{1:00}", t / 60, t % 60), label, Color.white, TextAnchor.MiddleCenter, 22);
         Text(new Rect(W - 320, 14, 300, 26), "SCORE " + GameState.Score, label, Gold, TextAnchor.MiddleRight, 16);
         Text(new Rect(W - 320, 40, 300, 22), "KILLS " + GameState.Kills, small, Color.white, TextAnchor.MiddleRight);
+        {
+            bool nb = GameState.Score > Leaderboard.Best && Leaderboard.Best > 0;
+            Text(new Rect(W - 330, 60, 216, 20), nb ? "NEW BEST!" : "BEST " + Leaderboard.Best, small, nb ? Gold : new Color(1, 1, 1, 0.65f), TextAnchor.MiddleRight);
+        }
 
         if (page == Page.None && !GameState.Over && Button(new Rect(W - 104, 68, 90, 28), "MENU", btnSmall)) Pause();
 
@@ -290,9 +330,9 @@ public class GameUI : MonoBehaviour
         GUI.Box(r, "", box);
         Text(new Rect(r.x, r.y + 14, r.width, 34), "SIGN IN OR CREATE ACCOUNT", label, Color.white, TextAnchor.MiddleCenter, 14);
         Text(new Rect(r.x + 50, r.y + 70, 200, 24), "USERNAME", small, Color.gray);
-        user = Clean(GUI.TextField(new Rect(r.x + 50, r.y + 94, r.width - 100, 38), user, 16, field));
+        user = Clean(Field(new Rect(r.x + 50, r.y + 94, r.width - 100, 38), user, 16, false, "USERNAME"));
         Text(new Rect(r.x + 50, r.y + 146, 200, 24), "PASSWORD", small, Color.gray);
-        pass = GUI.PasswordField(new Rect(r.x + 50, r.y + 170, r.width - 100, 38), pass, '*', 72, field);
+        pass = Field(new Rect(r.x + 50, r.y + 170, r.width - 100, 38), pass, 72, true, "PASSWORD");
         GUI.enabled = !Net.Busy;
         if (Button(new Rect(r.x + 50, r.y + 230, 205, 44), "LOGIN")) Net.Login(user, pass);
         if (Button(new Rect(r.x + 285, r.y + 230, 205, 44), "REGISTER")) Net.Register(user, pass);
@@ -308,13 +348,15 @@ public class GameUI : MonoBehaviour
         Dim(W, H, 0.35f);
         Text(new Rect(0, 70, W, 70), "REBOUND RUMBLE", title, Gold, TextAnchor.MiddleCenter, 54);
         Text(new Rect(0, 135, W, 30), "THE RINGS  -  ENDLESS", label, new Color(1f, 0.55f, 0.15f), TextAnchor.MiddleCenter, 14);
+        Text(new Rect(0, 170, W, 26), "BEST SCORE  " + Leaderboard.Best, label, Gold, TextAnchor.MiddleCenter, 16);
 
         float bx = W / 2 - 160, by = 240;
         if (Button(new Rect(bx, by, 320, 54), "PLAY")) StartTransit("ENTERING THE ARENA", GameState.StartRun);
         if (Button(new Rect(bx, by + 68, 320, 54), "LEADERBOARD")) { page = Page.Leaderboard; Net.FetchBoard(); }
-        if (Button(new Rect(bx, by + 136, 320, 54), "SETTINGS")) { settingsReturn = Page.Main; page = Page.Settings; serverField = Net.BaseUrl; }
+        if (Button(new Rect(bx, by + 136, 320, 54), "CO-OP  (2 PLAYERS)")) { page = Page.Coop; Coop.Connect(); }
+        if (Button(new Rect(bx, by + 204, 320, 54), "SETTINGS")) { settingsReturn = Page.Main; page = Page.Settings; serverField = Net.BaseUrl; }
 #if !UNITY_WEBGL
-        if (Button(new Rect(bx, by + 204, 320, 54), "QUIT"))
+        if (Button(new Rect(bx, by + 272, 320, 54), "QUIT"))
         {
 #if UNITY_EDITOR
             UnityEditor.EditorApplication.isPlaying = false;
@@ -333,53 +375,112 @@ public class GameUI : MonoBehaviour
     }
 
     // ------------------------------------------------------------------ leaderboard
+    int lbTab; Vector2 lbScroll;      // 0 = HIGH SCORE (best single run), 1 = TOTAL SCORE (all runs added up)
+
+    bool Tab(Rect r, string text, bool active)
+    {
+        if (active)
+        {
+            Rect(new Rect(r.x - 3, r.y - 3, r.width + 6, r.height + 6), Gold);
+            Rect(r, new Color(0.45f, 0.3f, 0.04f, 1f));
+            Text(r, text, label, Color.white, TextAnchor.MiddleCenter, 15);
+            return false;
+        }
+        return Button(r, text, btnSmall);
+    }
+
     void DrawLeaderboard(float W, float H)
     {
         Dim(W, H, 0.7f);
-        Rect r = Center(W, H, 660, 580);
+        Rect r = Center(W, H, 660, 660);
         GUI.Box(r, "", box);
-        bool online = Net.BoardLoaded;
+        bool online = Net.BoardLoaded || Net.BoardCached;
         Text(new Rect(r.x, r.y + 14, r.width, 40), "LEADERBOARD", title, Gold, TextAnchor.MiddleCenter, 26);
-        Text(new Rect(r.x, r.y + 52, r.width, 20), Net.BoardLoading ? "LOADING..." : (online ? "GLOBAL - ALL PLAYERS" : "OFFLINE - LOCAL SCORES ONLY"), small, online ? new Color(0.5f, 1f, 0.5f) : new Color(1f, 0.7f, 0.3f), TextAnchor.MiddleCenter);
-        Text(new Rect(r.x + 30, r.y + 84, 60, 20), "#", small, Color.gray);
-        Text(new Rect(r.x + 90, r.y + 84, 200, 20), "NAME", small, Color.gray);
-        Text(new Rect(r.x + 330, r.y + 84, 120, 20), "SCORE", small, Color.gray, TextAnchor.MiddleRight);
-        Text(new Rect(r.x + 470, r.y + 84, 130, 20), "TIME", small, Color.gray, TextAnchor.MiddleRight);
-        int rows = 0;
+        Text(new Rect(r.x, r.y + 52, r.width, 20), Net.BoardLoading ? "LOADING..." : (Net.BoardLoaded ? "GLOBAL - ALL PLAYERS" : (Net.BoardCached ? "OFFLINE - SHOWING LAST SAVED DATA" : "OFFLINE - LOCAL SCORES ONLY")), small, Net.BoardLoaded ? new Color(0.5f, 1f, 0.5f) : new Color(1f, 0.7f, 0.3f), TextAnchor.MiddleCenter);
+
+        // tabs: the active one is highlighted
+        if (Tab(new Rect(r.x + 90, r.y + 80, 230, 38), "HIGH SCORE", lbTab == 0)) { lbTab = 0; lbScroll = Vector2.zero; }
+        if (Tab(new Rect(r.x + 340, r.y + 80, 230, 38), "TOTAL SCORE", lbTab == 1)) { lbTab = 1; lbScroll = Vector2.zero; }
+
+        bool total = lbTab == 1;
+        Text(new Rect(r.x + 30, r.y + 130, 60, 20), "#", small, Color.gray);
+        Text(new Rect(r.x + 90, r.y + 130, 200, 20), "NAME", small, Color.gray);
+        Text(new Rect(r.x + 330, r.y + 130, 120, 20), total ? "TOTAL" : "SCORE", small, Color.gray, TextAnchor.MiddleRight);
+        Text(new Rect(r.x + 470, r.y + 130, 130, 20), total ? "RUNS" : "TIME", small, Color.gray, TextAnchor.MiddleRight);
+
         if (Net.State != AccountState.LoggedIn)
         {
-            Text(new Rect(r.x, r.y + 200, r.width, 30), "YOU ARE NOT LOGGED IN", label, new Color(1f, 0.7f, 0.3f), TextAnchor.MiddleCenter, 18);
-            Text(new Rect(r.x + 40, r.y + 240, r.width - 80, 40), "SIGN IN TO SEE THE GLOBAL LEADERBOARD AND SAVE YOUR SCORES.", small, new Color(1, 1, 1, 0.7f), TextAnchor.MiddleCenter);
-            if (Button(new Rect(r.x + r.width / 2 - 100, r.y + 300, 200, 46), "SIGN IN")) { Net.Logout(); page = Page.Auth; pass = ""; }
+            Text(new Rect(r.x, r.y + 230, r.width, 30), "YOU ARE NOT LOGGED IN", label, new Color(1f, 0.7f, 0.3f), TextAnchor.MiddleCenter, 18);
+            Text(new Rect(r.x + 40, r.y + 270, r.width - 80, 40), "SIGN IN TO SEE THE GLOBAL LEADERBOARD AND SAVE YOUR SCORES.", small, new Color(1, 1, 1, 0.7f), TextAnchor.MiddleCenter);
+            if (Button(new Rect(r.x + r.width / 2 - 100, r.y + 330, 200, 46), "SIGN IN")) { Net.Logout(); page = Page.Auth; pass = ""; }
         }
         else if (online)
         {
-            for (int i = 0; i < Net.Board.Count && i < 10; i++)
+            var list = total ? Net.Totals : Net.Board;
+            Rect area = new Rect(r.x + 10, r.y + 156, r.width - 20, 326);
+            Rect fr = new Rect(-10, -158, r.width, 0);
+            lbScroll = GUI.BeginScrollView(area, lbScroll, new Rect(0, 0, area.width - 22, Mathf.Max(area.height, list.Count * 34 + 4)), false, false);
+            for (int i = 0; i < list.Count && i < 10; i++)
             {
-                var e = Net.Board[i];
-                DrawRow(r, i, (i + 1).ToString(), e.username, e.score, e.seconds, Net.State == AccountState.LoggedIn && string.Equals(e.username, Net.User, System.StringComparison.OrdinalIgnoreCase));
-                rows++;
+                var e = list[i];
+                bool me = string.Equals(e.username, Net.User, System.StringComparison.OrdinalIgnoreCase);
+                int sec = Mathf.FloorToInt(e.seconds);
+                DrawRow(fr, i, (i + 1).ToString(), e.username, total ? e.total : e.score, total ? e.runs.ToString() : string.Format("{0:00}:{1:00}", sec / 60, sec % 60), me);
             }
+            GUI.EndScrollView();
+            if (list.Count == 0) Text(new Rect(r.x, r.y + 260, r.width, 30), "NO SCORES YET - PLAY A RUN!", label, new Color(1, 1, 1, 0.6f), TextAnchor.MiddleCenter, 16);
         }
         else
         {
-            var top = Leaderboard.Top(10);
-            for (int i = 0; i < top.Count; i++) { DrawRow(r, i, (i + 1).ToString(), top[i].name, top[i].score, top[i].seconds, top[i].mine); rows++; }
+            var top = Leaderboard.Top(100);
+            if (total)
+            {
+                var sum = new Dictionary<string, int[]>();
+                foreach (var t in top) { int[] a; if (!sum.TryGetValue(t.name, out a)) sum[t.name] = a = new int[2]; a[0] += t.score; a[1]++; }
+                var rows = new List<KeyValuePair<string, int[]>>(sum);
+                rows.Sort((x, y) => y.Value[0].CompareTo(x.Value[0]));
+                Rect area2 = new Rect(r.x + 10, r.y + 156, r.width - 20, 330); Rect fr2 = new Rect(-10, -158, r.width, 0);
+                lbScroll = GUI.BeginScrollView(area2, lbScroll, new Rect(0, 0, area2.width - 22, Mathf.Max(area2.height, rows.Count * 34 + 4)), false, false);
+                for (int i = 0; i < rows.Count && i < 50; i++) DrawRow(fr2, i, (i + 1).ToString(), rows[i].Key, rows[i].Value[0], rows[i].Value[1].ToString(), true);
+                GUI.EndScrollView();
+            }
+            else
+            {
+                Rect area3 = new Rect(r.x + 10, r.y + 156, r.width - 20, 330); Rect fr3 = new Rect(-10, -158, r.width, 0);
+                lbScroll = GUI.BeginScrollView(area3, lbScroll, new Rect(0, 0, area3.width - 22, Mathf.Max(area3.height, top.Count * 34 + 4)), false, false);
+                for (int i = 0; i < top.Count && i < 50; i++) { int sec = Mathf.FloorToInt(top[i].seconds); DrawRow(fr3, i, (i + 1).ToString(), top[i].name, top[i].score, string.Format("{0:00}:{1:00}", sec / 60, sec % 60), top[i].mine); }
+                GUI.EndScrollView();
+            }
         }
-        if (Net.State == AccountState.LoggedIn && Button(new Rect(r.x + 120, r.y + r.height - 66, 200, 46), "REFRESH")) Net.FetchBoard();
+        // fixed bar: your own standing (saved on the device, so it is still here offline)
+        if (Net.State == AccountState.LoggedIn)
+        {
+            float by2 = r.y + 490;
+            Rect(new Rect(r.x + 20, by2, r.width - 40, 34), new Color(0.55f, 0.37f, 0.05f, 0.85f));
+            Rect(new Rect(r.x + 20, by2, r.width - 40, 2), Gold);
+            bool have = Net.Me != null && Net.Me.runs > 0;
+            int rank = have ? (total ? Net.Me.rankTotal : Net.Me.rankBest) : 0;
+            int val = have ? (total ? Net.Me.total : Net.Me.best) : (total ? Leaderboard.Total : Leaderboard.Best);
+            int runsN = have ? Net.Me.runs : Leaderboard.Runs;
+            Text(new Rect(r.x + 30, by2 + 3, 60, 28), rank > 0 ? "#" + rank : "-", label, Color.white);
+            Text(new Rect(r.x + 90, by2 + 3, 240, 28), "YOU  " + Net.User.ToUpper(), label, Gold);
+            Text(new Rect(r.x + 330, by2 + 3, 120, 28), val.ToString(), label, Color.white, TextAnchor.MiddleRight);
+            Text(new Rect(r.x + 470, by2 + 3, 130, 28), runsN + (runsN == 1 ? " RUN" : " RUNS"), small, new Color(1, 1, 1, 0.8f), TextAnchor.MiddleRight);
+        }
+        if (Net.State == AccountState.LoggedIn && Net.SyncMsg.Length > 0) Text(new Rect(r.x + 20, r.y + r.height - 104, r.width - 40, 24), Net.SyncMsg + (Net.PendingCount > 0 ? "  [" + Net.PendingCount + " PENDING]" : ""), small, Net.SyncErr ? new Color(1f, 0.5f, 0.4f) : new Color(0.6f, 1f, 0.6f), TextAnchor.MiddleCenter);
+        if (Net.State == AccountState.LoggedIn && Button(new Rect(r.x + 120, r.y + r.height - 66, 200, 46), "REFRESH")) { Net.SyncNow(); Net.FetchBoard(); }
         if (Button(new Rect(r.x + r.width - 320, r.y + r.height - 66, 200, 46), "BACK")) page = Page.Main;
     }
 
-    void DrawRow(Rect r, int i, string rank, string name, int score, float seconds, bool mine)
+    void DrawRow(Rect r, int i, string rank, string name, int score, string right, bool mine)
     {
-        float y = r.y + 112 + i * 38;
-        if (mine) Rect(new Rect(r.x + 20, y - 2, r.width - 40, 34), new Color(0.6f, 0.4f, 0.05f, 0.45f));
+        float y = r.y + 158 + i * 34;
+        if (mine) Rect(new Rect(r.x + 20, y - 2, r.width - 40, 31), new Color(0.6f, 0.4f, 0.05f, 0.45f));
         Color c = i == 0 ? Gold : (mine ? Color.white : new Color(0.85f, 0.85f, 0.9f));
-        int s = Mathf.FloorToInt(seconds);
-        Text(new Rect(r.x + 30, y, 60, 30), rank, label, c);
-        Text(new Rect(r.x + 90, y, 240, 30), name.ToUpper(), label, c);
-        Text(new Rect(r.x + 330, y, 120, 30), score.ToString(), label, c, TextAnchor.MiddleRight);
-        Text(new Rect(r.x + 470, y, 130, 30), string.Format("{0:00}:{1:00}", s / 60, s % 60), label, c, TextAnchor.MiddleRight);
+        Text(new Rect(r.x + 30, y, 60, 28), rank, label, c);
+        Text(new Rect(r.x + 90, y, 240, 28), name.ToUpper(), label, c);
+        Text(new Rect(r.x + 330, y, 120, 28), score.ToString(), label, c, TextAnchor.MiddleRight);
+        Text(new Rect(r.x + 470, y, 130, 28), right, label, c, TextAnchor.MiddleRight);
     }
 
     // ------------------------------------------------------------------ settings
@@ -457,9 +558,19 @@ public class GameUI : MonoBehaviour
             Text(new Rect(cr.x, cr.y + 176, cr.width, 24), names[i], small, sel ? Gold : Color.white, TextAnchor.MiddleCenter);
             if (Button(new Rect(cr.x + 25, cr.y + 204, cr.width - 50, 34), sel ? "EQUIPPED" : "EQUIP", btnSmall)) { GameSettings.Costume = i; GameSettings.Save(); }
         }
+        // suit colour (tint over the costume): shown to your co-op partner too
+        for (int v = 0; v < Suits.Variants; v++)
+        {
+            var sw = new Rect(x + 450 + v * 58, y + 298, 50, 34);
+            bool vs = v == GameSettings.Variant;
+            Rect(new Rect(sw.x - 3, sw.y - 3, sw.width + 6, sw.height + 6), vs ? Gold : new Color(0.3f, 0.25f, 0.3f));
+            Rect(sw, Suits.VariantTint[v] == Color.white ? new Color(0.9f, 0.85f, 0.7f) : Suits.VariantTint[v]);
+            if (GUI.Button(sw, GUIContent.none, GUIStyle.none)) { GameSettings.Variant = v; GameSettings.Save(); Sfx.PlayUI("click"); }
+        }
+        Text(new Rect(x + 430, y + 336, 260, 18), "SUIT COLOUR", small, Color.white, TextAnchor.MiddleCenter);
         Text(new Rect(x, y + 300, 200, 30), "NAME", label, Color.white);
         if (Net.State == AccountState.LoggedIn) Text(new Rect(x + 120, y + 300, 400, 30), Net.User.ToUpper(), label, Gold);
-        else GameSettings.ProfileName = Clean(GUI.TextField(new Rect(x + 120, y + 298, 300, 34), GameSettings.ProfileName, 12, field)).ToUpper();
+        else GameSettings.ProfileName = Clean(Field(new Rect(x + 120, y + 298, 300, 34), GameSettings.ProfileName, 12, false, "PROFILE NAME")).ToUpper();
     }
 
     void DrawAccount(float x, float y, float w)
@@ -467,13 +578,10 @@ public class GameUI : MonoBehaviour
         string st = Net.State == AccountState.LoggedIn ? "SIGNED IN AS " + Net.User.ToUpper() : (Net.State == AccountState.Offline ? "OFFLINE MODE" : "NOT SIGNED IN");
         Text(new Rect(x, y, w, 30), st, label, Net.State == AccountState.LoggedIn ? Gold : new Color(1f, 0.7f, 0.3f));
         Text(new Rect(x, y + 36, w, 24), "SCORES WAITING TO SYNC: " + Net.PendingCount, small, Color.white);
-        Text(new Rect(x, y + 74, 200, 24), "SERVER", small, Color.gray);
-        if (serverField == null) serverField = Net.BaseUrl;
-        serverField = GUI.TextField(new Rect(x, y + 98, w, 36), serverField, 120, field);
-        if (Button(new Rect(x, y + 156, 220, 42), "SYNC NOW", btnSmall)) { Net.SetServer(serverField); Net.SyncNow(); Net.FetchBoard(); }
-        if (GameState.Mode == GameMode.Menu && Button(new Rect(x + 240, y + 156, 220, 42), Net.State == AccountState.LoggedIn ? "LOG OUT" : "SIGN IN", btnSmall))
+        if (Button(new Rect(x, y + 90, 220, 42), "SYNC NOW", btnSmall)) { Net.SyncNow(); Net.FetchBoard(); Net.FetchMine(); }
+        if (GameState.Mode == GameMode.Menu && Button(new Rect(x + 240, y + 90, 220, 42), Net.State == AccountState.LoggedIn ? "LOG OUT" : "SIGN IN", btnSmall))
         { Net.Logout(); page = Page.Auth; pass = ""; }
-        Text(new Rect(x, y + 214, w, 24), Net.Message, small, Net.MessageIsError ? new Color(1f, 0.45f, 0.4f) : new Color(0.6f, 1f, 0.6f));
+        Text(new Rect(x, y + 148, w, 24), Net.Message, small, Net.MessageIsError ? new Color(1f, 0.45f, 0.4f) : new Color(0.6f, 1f, 0.6f));
     }
 
     float Slider(float x, float y, float w, string name, float v)
@@ -570,11 +678,13 @@ public class GameUI : MonoBehaviour
         int t2 = Mathf.FloorToInt(GameState.RunTime);
         Text(new Rect(0, 230, W, 34), "SCORE " + Mathf.RoundToInt(GameState.Score * c), label, new Color(Gold.r, Gold.g, Gold.b, Mathf.Clamp01(t / 0.6f)), TextAnchor.MiddleCenter, 24);
         Text(new Rect(0, 272, W, 26), "KILLS " + Mathf.RoundToInt(GameState.Kills * c) + "    TIME " + string.Format("{0:00}:{1:00}", t2 / 60, t2 % 60), label, new Color(1, 1, 1, Mathf.Clamp01(t / 0.8f)), TextAnchor.MiddleCenter, 14);
-        if (lastRank > 0) Text(new Rect(0, 306, W, 26), "LEADERBOARD RANK #" + lastRank, label, new Color(0.5f, 1f, 0.5f, c), TextAnchor.MiddleCenter, 14);
-        if (Net.State != AccountState.LoggedIn) Text(new Rect(0, 334, W, 22), "SAVED OFFLINE - SYNCS WHEN YOU LOG IN", small, new Color(1f, 0.7f, 0.3f, c), TextAnchor.MiddleCenter);
+        Text(new Rect(0, 300 - 0, W, 26), Leaderboard.LastWasBest ? "NEW PERSONAL BEST!" : "PERSONAL BEST " + Leaderboard.Best, label, Leaderboard.LastWasBest ? new Color(Gold.r, Gold.g, Gold.b, c) : new Color(1, 1, 1, 0.7f * c), TextAnchor.MiddleCenter, 16);
+        if (lastRank > 0) Text(new Rect(0, 328, W, 26), "LEADERBOARD RANK #" + lastRank, label, new Color(0.5f, 1f, 0.5f, c), TextAnchor.MiddleCenter, 14);
+        if (Net.State != AccountState.LoggedIn) Text(new Rect(0, 356, W, 22), "SAVED OFFLINE - SYNCS WHEN YOU LOG IN", small, new Color(1f, 0.7f, 0.3f, c), TextAnchor.MiddleCenter);
         if (t < 1.4f) return;
-        float bx = W / 2 - 160, by = 380;
-        if (Button(new Rect(bx, by, 320, 52), "TRY AGAIN")) StartTransit("ENTERING THE ARENA", GameState.StartRun);
+        float bx = W / 2 - 160, by = 396;
+        if (Coop.IsGuest) Text(new Rect(bx, by + 8, 320, 36), "WAITING FOR THE HOST...", label, new Color(0.5f, 0.75f, 1f), TextAnchor.MiddleCenter, 14);
+        else if (Button(new Rect(bx, by, 320, 52), "TRY AGAIN")) StartTransit("ENTERING THE ARENA", GameState.StartRun);
         if (Button(new Rect(bx, by + 66, 320, 52), "MAIN MENU")) GameState.ReturnToMenu(false);
     }
 
@@ -680,7 +790,6 @@ public class GameUI : MonoBehaviour
         float a2 = Mathf.Clamp01((t - 2.9f) / 0.7f);
         if (a2 > 0f)
         {
-            DrawRingSprite(new Rect(W / 2 - 60, H / 2 - 210, 120, 120), t * 90f, new Color(1f, 1f, 1f, a2));
             Text(new Rect(0, H / 2 - 60, W, 80), "REBOUND RUMBLE", title, new Color(Gold.r, Gold.g, Gold.b, a2), TextAnchor.MiddleCenter, 54);
             Text(new Rect(0, H / 2 + 20, W, 30), "THE RINGS", label, new Color(1f, 0.55f, 0.15f, a2), TextAnchor.MiddleCenter, 14);
         }
@@ -691,7 +800,6 @@ public class GameUI : MonoBehaviour
     {
         float t = Time.unscaledTime - pageStart;
         Rect(new Rect(0, 0, W, H), new Color(0.03f, 0.02f, 0.06f, 1f));
-        DrawRingSprite(new Rect(W / 2 - 50, H / 2 - 170, 100, 100), t * 200f, Color.white);
         Text(new Rect(0, H / 2 - 60, W, 50), "LOADING", title, Gold, TextAnchor.MiddleCenter, 34);
         Rect(new Rect(W / 2 - 252, H / 2 + 6, 504, 22), new Color(0.3f, 0.22f, 0.1f));
         Rect(new Rect(W / 2 - 250, H / 2 + 8, 500, 18), new Color(0.05f, 0.04f, 0.08f));

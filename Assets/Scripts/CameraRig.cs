@@ -33,11 +33,23 @@ public class CameraRig : MonoBehaviour
         instance.shakeAmp = amplitude; instance.shakeLeft = instance.shakeTotal = seconds;
     }
 
+    float baseSize;
+    Camera camRef;
+
+    // keep at least ~8 world units visible horizontally so tall/narrow screens (phones in portrait, odd windows) still see around the player
+    void FitAspect()
+    {
+        if (camRef == null) camRef = GetComponent<Camera>();
+        if (camRef == null || !camRef.orthographic || baseSize <= 0f) return;
+        float need = 8f * GS.S / Mathf.Max(0.3f, camRef.aspect);
+        camRef.orthographicSize = Mathf.Max(baseSize, need);
+    }
+
     void Awake()
     {
         instance = this;
         var cam = GetComponent<Camera>();
-        if (cam != null && cam.orthographic) cam.orthographicSize *= GS.S;
+        if (cam != null && cam.orthographic) { cam.orthographicSize *= GS.S; baseSize = cam.orthographicSize; }
         follow = GetComponent<Cainos.PixelArtTopDown_Basic.CameraFollow>();
         GameObject p = GameObject.FindWithTag("Player");
         if (p != null) player = p.transform;
@@ -76,6 +88,7 @@ public class CameraRig : MonoBehaviour
 
     void LateUpdate()
     {
+        FitAspect();
         if (GameState.Mode != GameMode.Playing || shakeLeft <= 0f) return;
         shakeLeft -= Time.deltaTime;
         float k = Mathf.Clamp01(shakeLeft / Mathf.Max(0.01f, shakeTotal));

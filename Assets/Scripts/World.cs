@@ -77,6 +77,7 @@ public class World : MonoBehaviour
 /// <summary>Walk into it (no button needed) and stay a moment to leave the run and bank your score.</summary>
 public class Portal : MonoBehaviour
 {
+    public bool IsAltar { get { return existing; } }
     public Vector2 Anchor { get; private set; }     // where the exit is (centre of the altar's base / the scripted portal)
     bool existing;                                  // true when this is the map's own altar
     float reach = 1.3f * GS.S;
@@ -155,10 +156,10 @@ public class Portal : MonoBehaviour
             Vfx.Burst(Anchor + new Vector2(Random.Range(-0.5f, 0.5f), Random.Range(-0.2f, 1.2f)), new Color(1f, 0.8f, 0.3f), 3, 1.2f, 0.1f, 0.6f);
         }
 
-        if (!GameState.Active || player == null) { progress = 0f; World.PortalProgress = 0f; World.NearPortal = false; return; }
+        if (Coop.IsGuest || !GameState.Active || player == null) { progress = 0f; World.PortalProgress = 0f; World.NearPortal = false; return; }
 
         Vector2 pp = (Vector2)player.position + new Vector2(0f, 0.4f);
-        bool near = Vector2.Distance(pp, Anchor + new Vector2(0f, 0.2f)) < reach;
+        bool near = Vector2.Distance(pp, Anchor + new Vector2(0f, 0.2f)) < reach || Coop.AvatarNear(Anchor, reach, -1);
         World.NearPortal = near;
         progress = near ? progress + Time.deltaTime / 1.2f : Mathf.Max(0f, progress - Time.deltaTime * 2f);
         World.PortalProgress = progress;
@@ -225,12 +226,16 @@ public class Chest : MonoBehaviour
 
     void OnDestroy() { GameState.OnRunStart -= ResetChest; All.Remove(this); }
 
+    public bool Ready { get { return ready; } }
+    public ChestKind Kind { get { return kind; } }
+    /// <summary>Co-op guest: show the chest as open/closed like the host's.</summary>
+    public void SetReady(bool r) { if (ready == r) return; ready = r; if (sr != null && frames != null) sr.sprite = frames[r ? 0 : 1]; if (glow != null) glow.enabled = r; }
     void ResetChest() { ready = true; if (sr != null) sr.sprite = frames[0]; if (glow != null) glow.enabled = true; }
 
     void Update()
     {
         if (glow != null && ready) glow.transform.localScale = Vector3.one * (1.8f + Mathf.Sin(Time.time * 4f) * 0.2f);
-        if (!GameState.Active || player == null) return;
+        if (Coop.IsGuest || !GameState.Active || player == null) return;
 
         if (!ready)
         {
@@ -243,7 +248,7 @@ public class Chest : MonoBehaviour
         }
 
         Vector2 pp = (Vector2)player.position + new Vector2(0f, 0.4f);
-        if (Vector2.Distance(pp, transform.position) < 1.0f * GS.S) Open();
+        if (Vector2.Distance(pp, transform.position) < 1.0f * GS.S || Coop.AvatarNear(transform.position, 1.0f * GS.S, -1)) Open();
     }
 
     void Open()

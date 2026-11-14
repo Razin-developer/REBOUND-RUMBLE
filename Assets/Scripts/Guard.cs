@@ -69,7 +69,7 @@ public class Guard : MonoBehaviour
         bool canUse = GameState.Active && !GameState.Over && player != null;
         float dt = Time.deltaTime;
 
-        bool want = canUse && !locked && InputHub.Held(KeyCode.E) && Left > 0f;
+        bool want = canUse && !locked && (InputHub.Held(KeyCode.E) || TouchControls.GuardHeld) && Left > 0f;
         if (want)
         {
             Active = true;

@@ -30,14 +30,21 @@ const scoreSchema = new mongoose.Schema({
 });
 scoreSchema.index({ user: 1, clientId: 1 }, { unique: true });
 scoreSchema.index({ score: -1 });
-const User = mongoose.model('User', userSchema);
-const Score = mongoose.model('Score', scoreSchema);
+// own database + own collection names: this Atlas cluster is shared with other projects (its default `test.users` already
+// holds other data, which made the unique-username index fail with E11000)
+const API_VERSION = '2026-11-14.6';
+const DB_NAME = process.env.DB_NAME || 'rebound_rumble';
+const User = mongoose.model('User', userSchema, 'rr_users');
+const Score = mongoose.model('Score', scoreSchema, 'rr_scores');
 
 // ---------- app ----------
 const app = express();
 app.set('trust proxy', 1);                 // behind Render / Cloudflare
 app.use(cors({ origin: true }));           // token auth in a header (no cookies), so any origin (itch.io, localhost) is fine
 app.use(express.json({ limit: '50kb' }));
+// never let browsers / CDNs cache API answers (a cached leaderboard looks like 'scores not updating')
+app.use((req, res, next) => { res.set('Cache-Control', 'no-store, max-age=0'); res.removeHeader('ETag'); next(); });
+app.set('etag', false);
 app.use('/api/', rateLimit({ windowMs: 60 * 1000, max: 120, standardHeaders: true, legacyHeaders: false }));
 const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 30, standardHeaders: true, legacyHeaders: false });
 
@@ -62,15 +69,15 @@ async function connectDB() {
   if (cache.ready && mongoose.connection.readyState === 1) return;
   if (!MONGODB_URI) throw new Error('MONGODB_URI is not set');
   if (!cache.promise) {
-    cache.promise = mongoose.connect(cleanUri(MONGODB_URI), { serverSelectionTimeoutMS: 8000, maxPoolSize: 5, bufferCommands: false })
-      .then(() => Promise.all([User.init(), Score.init()]))   // make sure the unique indexes exist
+    cache.promise = mongoose.connect(cleanUri(MONGODB_URI), { dbName: DB_NAME, serverSelectionTimeoutMS: 8000, maxPoolSize: 5, bufferCommands: false })
+      .then(() => Promise.all([User.init(), Score.init()]).catch((e) => console.error('index', safe(e.message))))   // indexes are best-effort: never block the API on them
       .then(() => { cache.ready = true; });
   }
   try { await cache.promise; cache.lastError = ''; } catch (e) { cache.promise = null; cache.lastError = safe(e.message); throw e; }
 }
 // health first (before the DB gate): reports WHY the database is unreachable instead of just failing
 app.get('/api/health', async (req, res) => {
-  try { await connectDB(); res.json({ ok: true, db: true }); }
+  try { await connectDB(); res.json({ ok: true, db: true, v: API_VERSION, dbName: DB_NAME }); }
   catch (e) { res.status(503).json({ ok: false, db: false, hasUri: !!MONGODB_URI, reason: safe(e.message) }); }
 });
 app.use(async (req, res, next) => {
@@ -111,16 +118,51 @@ app.post('/api/login', authLimiter, async (req, res) => {
 app.post('/api/scores', auth, async (req, res) => {
   try {
     const list = Array.isArray(req.body && req.body.scores) ? req.body.scores.slice(0, 50) : [];
+    console.log('scores in', req.user.username, JSON.stringify(list));
+    const results = [];
     let saved = 0;
     for (const s of list) {
-      const clientId = String(s.id || '').slice(0, 64);
-      const score = Math.floor(Number(s.score)), seconds = Math.floor(Number(s.seconds) || 0), kills = Math.floor(Number(s.kills) || 0);
-      if (!clientId || !Number.isFinite(score) || score < 0 || score > 5000000 || seconds < 0 || seconds > 86400 || kills < 0 || kills > 100000) continue;
-      try { await Score.create({ user: req.user.id, username: req.user.username, clientId, score, seconds, kills }); saved++; }
-      catch (e) { if (!(e && e.code === 11000)) throw e; /* already stored */ }
+      const id = String((s && s.id) || '').slice(0, 64);
+      const score = Math.floor(Number(s && s.score)), seconds = Math.floor(Number(s && s.seconds) || 0), kills = Math.floor(Number(s && s.kills) || 0);
+      if (!id || !Number.isFinite(score) || score < 0 || score > 5000000 || seconds < 0 || seconds > 86400 || kills < 0 || kills > 100000) {
+        console.warn('score rejected', JSON.stringify(s)); results.push({ id, status: 'rejected' }); continue;
+      }
+      try {
+        const doc = await Score.create({ user: req.user.id, username: req.user.username, clientId: id, score, seconds, kills });
+        saved++; results.push({ id, status: 'saved', _id: String(doc._id) });
+      } catch (e) {
+        if (e && e.code === 11000) results.push({ id, status: 'duplicate' });
+        else { console.error('score create', e.message); results.push({ id, status: 'error', error: safe(e.message) }); }
+      }
     }
-    res.json({ ok: true, saved, accepted: list.map((s) => String(s.id || '')) });
-  } catch (e) { console.error('scores', e.message); res.status(500).json({ error: 'Server error' }); }
+    const total = await Score.countDocuments({ user: req.user.id });
+    const bestDoc = await Score.findOne({ user: req.user.id }).sort({ score: -1 }).lean();
+    const failed = results.some((r) => r.status === 'error');
+    console.log('scores result', JSON.stringify(results), 'total', total);
+    res.status(failed ? 500 : 200).json({ ok: !failed, saved, total, best: bestDoc ? bestDoc.score : 0, results,
+      accepted: results.filter((r) => r.status !== 'error').map((r) => r.id), db: DB_NAME, v: API_VERSION });
+  } catch (e) { console.error('scores', e.message); res.status(500).json({ error: 'Server error: ' + safe(e.message) }); }
+});
+
+// Public truth-teller: open https://<api>/api/stats in a browser to see exactly what is stored (and which database/collections).
+app.get('/api/stats', async (req, res) => {
+  try {
+    const [users, scores, last, top] = await Promise.all([
+      User.countDocuments({}), Score.countDocuments({}),
+      Score.find({}).sort({ createdAt: -1 }).limit(5).lean(), Score.find({}).sort({ score: -1 }).limit(5).lean(),
+    ]);
+    const fmt = (r) => ({ username: r.username, score: r.score, seconds: r.seconds, at: r.createdAt });
+    res.json({ v: API_VERSION, db: DB_NAME, collections: { users: 'rr_users', scores: 'rr_scores' }, users, scores, latest: last.map(fmt), top: top.map(fmt) });
+  } catch (e) { res.status(500).json({ error: safe(e.message) }); }
+});
+
+// The signed-in player's own stored scores (for debugging / "did my run arrive?").
+app.get('/api/scores/mine', auth, async (req, res) => {
+  try {
+    const rows = await Score.find({ user: req.user.id }).sort({ createdAt: -1 }).limit(10).lean();
+    const best = await Score.findOne({ user: req.user.id }).sort({ score: -1 }).lean();
+    res.json({ username: req.user.username, best: best ? best.score : 0, recent: rows.map((r) => ({ score: r.score, seconds: r.seconds, at: r.createdAt })) });
+  } catch (e) { console.error('mine', e.message); res.status(500).json({ error: 'Server error: ' + safe(e.message) }); }
 });
 
 // Best score per player, top N.
@@ -133,7 +175,29 @@ app.get('/api/leaderboard', async (req, res) => {
       { $sort: { score: -1, seconds: 1 } },
       { $limit: n },
     ]);
-    res.json({ entries: rows.map((r) => ({ username: r.username, score: r.score, seconds: r.seconds, kills: r.kills })) });
+    // total score = every run a player has ever banked, added up
+    const totalRows = await Score.aggregate([
+      { $group: { _id: '$user', username: { $first: '$username' }, total: { $sum: '$score' }, runs: { $sum: 1 }, seconds: { $sum: '$seconds' } } },
+      { $sort: { total: -1 } },
+      { $limit: n },
+    ]);
+    // the signed-in player's own latest runs, so every finished game visibly shows up even if it is not a new best
+    let mine = [];
+    let me = { best: 0, total: 0, runs: 0, rankBest: 0, rankTotal: 0, players: 0 };
+    const h = req.headers.authorization || '';
+    if (h.startsWith('Bearer ')) {
+      try {
+        const u = jwt.verify(h.slice(7), JWT_SECRET);
+        const last = await Score.find({ user: u.id }).sort({ createdAt: -1 }).limit(5).lean();
+        mine = last.map((r) => ({ username: r.username, score: r.score, seconds: r.seconds, kills: r.kills }));
+        // my standing, even when I am outside the top 10
+        const per = await Score.aggregate([{ $group: { _id: '$user', best: { $max: '$score' }, total: { $sum: '$score' }, runs: { $sum: 1 } } }]);
+        const m = per.find((p) => String(p._id) === String(u.id));
+        if (m) me = { best: m.best, total: m.total, runs: m.runs,
+          rankBest: 1 + per.filter((p) => p.best > m.best).length, rankTotal: 1 + per.filter((p) => p.total > m.total).length, players: per.length };
+      } catch (e) { /* invalid token: just no personal list */ }
+    }
+    res.json({ entries: rows.map((r) => ({ username: r.username, score: r.score, seconds: r.seconds, kills: r.kills })), mine, me, totals: totalRows.map((r) => ({ username: r.username, total: r.total, runs: r.runs, seconds: r.seconds })), v: API_VERSION });
   } catch (e) { console.error('leaderboard', e.message); res.status(500).json({ error: 'Server error' }); }
 });
 

@@ -1,7 +1,7 @@
 using System.Collections.Generic;
 using UnityEngine;
 
-public enum EnemyKind { Slime, Bat, Golem, Ant, Beetle, Wasp }
+public enum EnemyKind { Slime, Bat, Golem, Ant, Beetle, Wasp, Boss }
 
 /// <summary>Chasing enemy. Rings pass through (and hurt) it; touching the player hurts the player.</summary>
 public class Enemy : MonoBehaviour
@@ -10,7 +10,13 @@ public class Enemy : MonoBehaviour
 
     public EnemyKind kind;
     public float Radius { get; private set; }
-    public bool passive;          // tutorial dummy: stands still and never hurts
+    public bool passive;
+    string spawnLayer = GameState.ActorLayer;
+    public static Enemy Boss;          // tutorial dummy: stands still and never hurts
+    public int Id;                     // co-op: identifies this enemy in snapshots
+    static int nextId;
+    public Vector2 Pos { get { return rb != null ? rb.position : (Vector2)transform.position; } }
+    public int Flags { get { return ((dashState == 1 || bossState == 1) ? 1 : 0) | ((kind == EnemyKind.Boss && Enraged) ? 2 : 0); } }
 
     float speed, hp, maxHp, bodyScale, seed, nextPath, flashUntil, stuckTime, sideUntil;
     int damage, score;
@@ -30,14 +36,16 @@ public class Enemy : MonoBehaviour
     static PhysicsMaterial2D slick;
 
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
-    static void ResetStatics() { All.Clear(); slick = null; }
+    static void ResetStatics() { All.Clear(); slick = null; Boss = null; nextId = 0; }
 
-    public static Enemy Spawn(EnemyKind kind, Vector2 pos, float hpScale = 1f, float speedScale = 1f)
+    public static Enemy Spawn(EnemyKind kind, Vector2 pos, float hpScale = 1f, float speedScale = 1f, string layerName = null)
     {
         var go = new GameObject("Enemy " + kind);
         go.transform.position = pos;
-        go.layer = 20; // same physics layer as the player / map walls
+        int pl = layerName != null ? LayerMask.NameToLayer(layerName) : -1;
+        go.layer = pl >= 0 ? pl : 20; // same physics layer as the player / map walls
         var e = go.AddComponent<Enemy>();
+        e.spawnLayer = pl >= 0 ? layerName : GameState.ActorLayer;
         e.Setup(kind, hpScale, speedScale);
         return e;
     }
@@ -45,6 +53,7 @@ public class Enemy : MonoBehaviour
     void Setup(EnemyKind k, float hpScale, float speedScale)
     {
         kind = k;
+        Id = ++nextId;
         seed = Random.value * 10f;
         string sheet;
         float baseHp;
@@ -65,6 +74,9 @@ public class Enemy : MonoBehaviour
             case EnemyKind.Wasp:
                 sheet = "enemy_wasp"; speed = 2.4f; baseHp = 1; damage = 1; score = 20; bodyScale = 1f; Radius = 0.28f;
                 burstColor = new Color(1f, 0.85f, 0.2f); frameTime = 0.06f; nextDash = Time.time + Random.Range(1.5f, 3f); break;
+            case EnemyKind.Boss:
+                sheet = "boss"; speed = 1.35f; baseHp = 70; damage = 2; score = 500; bodyScale = 2.1f; Radius = 0.85f;
+                burstColor = new Color(0.7f, 0.45f, 1f); frameTime = 0.5f; Boss = this; break;
             default:
                 sheet = "enemy_slime"; speed = 2.0f; baseHp = 2; damage = 1; score = 10; bodyScale = 1f; Radius = 0.35f;
                 burstColor = new Color(0.4f, 0.9f, 0.35f); frameTime = 0.3f; break;
@@ -74,12 +86,12 @@ public class Enemy : MonoBehaviour
         bodyScale *= GS.S; Radius *= GS.S;
         transform.localScale = Vector3.one * bodyScale;
         frameTime *= 0.5f;
-        frames = GameAssets.Frames(sheet, 4);
+        frames = kind == EnemyKind.Boss ? BossArt.Frames() : GameAssets.Frames(sheet, 4);
 
         sr = gameObject.AddComponent<SpriteRenderer>();
         sr.sprite = frames[0];
-        sr.sortingLayerName = GameState.ActorLayer;
-        sr.sortingOrder = 2;
+        sr.sortingLayerName = spawnLayer;
+        sr.sortingOrder = kind == EnemyKind.Boss ? 3 : 2;
 
         if (slick == null) slick = new PhysicsMaterial2D("EnemySlick") { friction = 0f, bounciness = 0f };
         rb = gameObject.AddComponent<Rigidbody2D>();
@@ -87,7 +99,7 @@ public class Enemy : MonoBehaviour
         rb.freezeRotation = true;
         rb.interpolation = RigidbodyInterpolation2D.Interpolate;
         rb.collisionDetectionMode = CollisionDetectionMode2D.Continuous;
-        rb.mass = kind == EnemyKind.Golem ? 4f : (kind == EnemyKind.Ant ? 0.4f : 1f);
+        rb.mass = kind == EnemyKind.Boss ? 30f : kind == EnemyKind.Golem ? 4f : (kind == EnemyKind.Ant ? 0.4f : 1f);
         var col = gameObject.AddComponent<CircleCollider2D>();
         col.radius = Radius / bodyScale;
         col.sharedMaterial = slick;
@@ -101,7 +113,7 @@ public class Enemy : MonoBehaviour
         All.Add(this);
     }
 
-    void OnDestroy() { All.Remove(this); }
+    void OnDestroy() { All.Remove(this); if (Boss == this) Boss = null; }
 
     void Update()
     {
@@ -114,7 +126,9 @@ public class Enemy : MonoBehaviour
 
         if (Time.time < flashUntil) sr.color = new Color(1f, 0.35f, 0.35f);
         else if (dashState == 1) sr.color = new Color(1f, 1f, 0.35f);   // wasp telegraphs its dash
-        else sr.color = Color.white;
+        else if (kind == EnemyKind.Boss && bossState == 1) sr.color = Color.Lerp(Color.white, new Color(1f, 0.35f, 0.3f), 0.5f + 0.5f * Mathf.Sin(Time.time * 24f));
+        else if (kind == EnemyKind.Boss && Enraged) sr.color = new Color(1f, 0.7f, 0.7f);
+        else sr.color = Difficulty.Frenzy ? new Color(1f, 0.55f, 0.55f) : Color.white;
     }
 
     void LateUpdate()
@@ -129,9 +143,11 @@ public class Enemy : MonoBehaviour
         if (playerT == null || !GameState.Active) { rb.linearVelocity = Vector2.zero; return; }
 
         if (passive) { knock = Vector2.Lerp(knock, Vector2.zero, 8f * Time.fixedDeltaTime); rb.linearVelocity = knock; return; }
+        if (kind == EnemyKind.Boss && BossTick()) return;
 
         Vector2 pos = rb.position;
-        Vector2 target = playerT.position;
+        Transform pt = Coop.Target(playerT, pos);   // co-op: chase whichever hero is closer
+        Vector2 target = pt.position;
 
         // ---- wasp: wind up, then dash straight at where you were ----
         if (kind == EnemyKind.Wasp)
@@ -161,7 +177,7 @@ public class Enemy : MonoBehaviour
         if (Time.time >= nextPath)
         {
             nextPath = Time.time + 0.15f;
-            int pl = playerT.gameObject.layer, el = gameObject.layer;
+            int pl = pt.gameObject.layer, el = gameObject.layer;
             Vector2 sd;
             if (pl != el && pl >= 20 && el >= 20 && Nav.StairDirection(pos, el, pl > el, Radius * 0.8f, out sd)) desired = sd;   // other level: walk to the stairs first
             else desired = Nav.Direction(pos, target, Radius * 0.8f);
@@ -192,7 +208,7 @@ public class Enemy : MonoBehaviour
         }
         if (sep.sqrMagnitude > 0f) dir = (dir + sep * 0.9f).normalized;
 
-        float spd = speed;
+        float spd = speed * Difficulty.LiveSpeed;
         if (kind == EnemyKind.Slime) spd *= 0.35f + 1.0f * Mathf.Abs(Mathf.Sin(Time.time * 3f + seed)); // hopping
         if (kind == EnemyKind.Bat) dir = (dir + new Vector2(-dir.y, dir.x) * Mathf.Sin(Time.time * 6f + seed) * 0.6f).normalized;
         if (kind == EnemyKind.Ant) dir = (dir + new Vector2(-dir.y, dir.x) * Mathf.Sin(Time.time * 9f + seed) * 0.25f).normalized;
@@ -205,7 +221,9 @@ public class Enemy : MonoBehaviour
     {
         if (passive) return;
         var ph = c.collider.GetComponentInParent<PlayerHealth>();
-        if (ph != null) ph.Damage(damage, ((Vector2)ph.transform.position - rb.position));
+        if (ph != null) ph.Damage(Mathf.Max(1, Mathf.RoundToInt(damage * Difficulty.DamageMul)), ((Vector2)ph.transform.position - rb.position));
+        var rbody = c.collider.GetComponentInParent<RemoteBody>();
+        if (rbody != null) rbody.Damage(Mathf.Max(1, Mathf.RoundToInt(damage * Difficulty.DamageMul)), ((Vector2)rbody.transform.position - rb.position));
     }
 
     public void Hit(float dmg, Vector2 dir)
@@ -213,7 +231,7 @@ public class Enemy : MonoBehaviour
         if (hp <= 0f) return;
         hp -= dmg;
         flashUntil = Time.time + 0.12f;
-        knock = dir.normalized * (kind == EnemyKind.Golem ? 3f : (kind == EnemyKind.Beetle ? 4f : 6f));
+        knock = dir.normalized * (kind == EnemyKind.Boss ? 0.6f : kind == EnemyKind.Golem ? 3f : (kind == EnemyKind.Beetle ? 4f : 6f));
         if (GameSettings.DamageNumbers)
             FloatingText.Add((Vector2)transform.position + new Vector2(0f, 0.5f), Mathf.RoundToInt(dmg).ToString(), new Color(1f, 0.9f, 0.4f), 16, 0.6f);
         CameraRig.Shake(0.05f, 0.08f);
@@ -223,11 +241,67 @@ public class Enemy : MonoBehaviour
         if (hp <= 0f) Die();
     }
 
+    // ------------------------------------------------------------------ boss behaviour: slam + summon + enrage
+    int bossState;                 // 0 chase, 1 slam wind-up
+    float bossStateUntil, nextSlam = -1f, nextSummon = -1f;
+    public bool Enraged { get { return hp < maxHp * 0.5f; } }
+    public float HpFrac { get { return Mathf.Clamp01(hp / Mathf.Max(1f, maxHp)); } }
+    public const float SlamRadius = 3.4f;
+
+    bool BossTick()
+    {
+        if (nextSlam < 0f) { nextSlam = Time.time + 4f; nextSummon = Time.time + 6f; }
+        if (bossState == 1)
+        {
+            rb.linearVelocity = Vector2.zero;
+            if (Time.time >= bossStateUntil)
+            {
+                bossState = 0;
+                float R = SlamRadius * GS.S;
+                Vector2 c = rb.position;
+                Vfx.Shockwave(c, new Color(1f, 0.5f, 0.2f), R * 1.2f, 0.35f);
+                Vfx.Burst(c, new Color(1f, 0.6f, 0.2f), 40, 7f, 0.22f, 0.6f);
+                Sfx.Play("enemy_die", 1f, 0.45f);
+                CameraRig.Shake(0.6f, 0.35f);
+                if (playerT != null && ((Vector2)playerT.position - c).sqrMagnitude < R * R && playerT.gameObject.layer == gameObject.layer)
+                {
+                    var ph = playerT.GetComponent<PlayerHealth>();
+                    if (ph != null) ph.Damage(Mathf.Max(1, Mathf.RoundToInt(2f * Difficulty.DamageMul)), (Vector2)playerT.position - c);
+                }
+                Coop.SlamAvatar(c, R, gameObject.layer);
+                nextSlam = Time.time + (Enraged ? 4.5f : 7f);
+            }
+            return true;
+        }
+        if (Time.time >= nextSlam && playerT != null && ((Vector2)playerT.position - rb.position).sqrMagnitude < 14f * 14f)
+        {
+            bossState = 1; bossStateUntil = Time.time + 0.9f;
+            Vfx.Shockwave(rb.position, new Color(1f, 0.25f, 0.2f), SlamRadius * GS.S * 1.1f, 0.9f);
+            Sfx.Play("hurt", 0.7f, 0.5f);
+            FloatingText.Add(rb.position + Vector2.up * 2.2f, "!", new Color(1f, 0.3f, 0.25f), 26, 0.9f);
+            return true;
+        }
+        if (Time.time >= nextSummon)
+        {
+            nextSummon = Time.time + (Enraged ? 7f : 11f);
+            int n = Mathf.Min(Enraged ? 4 : 3, 20 - All.Count);
+            for (int i = 0; i < n; i++)
+            {
+                Vector2 p = rb.position + Random.insideUnitCircle.normalized * (1.6f * GS.S + 0.5f);
+                Spawn(Random.value < 0.5f ? EnemyKind.Ant : EnemyKind.Slime, p, 1f, 1.1f, spawnLayer);
+            }
+            Vfx.Shockwave(rb.position, burstColor, 2.2f, 0.4f);
+        }
+        if (Enraged) speed = Mathf.Max(speed, 1.35f * 1.5f * GS.S * 1.0f);
+        return false;
+    }
+
     void Die()
     {
         Vfx.Burst(transform.position, burstColor, 26, 5.5f, 0.22f, 0.55f);
         Vfx.Burst(transform.position, Color.white, 8, 3f, 0.14f, 0.3f);
-        Sfx.Play("enemy_die", 0.8f, kind == EnemyKind.Golem ? 0.7f : 1f);
+        Sfx.Play("enemy_die", 0.8f, kind == EnemyKind.Golem || kind == EnemyKind.Boss ? 0.6f : 1f);
+        if (kind == EnemyKind.Boss) { for (int i = 0; i < 4; i++) Vfx.Shockwave(transform.position, Boosts.Tint((BoostKind)(i % 5)), 2f + i * 0.9f, 0.5f + i * 0.15f); Vfx.Burst(transform.position, Color.white, 60, 8f, 0.25f, 0.9f); BossDirector.OnBossDied(transform.position); }
         if (kind == EnemyKind.Bat) Fx.Wisps(transform.position, new Color(0.95f, 0.3f, 0.5f, 0.9f), 9);
         else Fx.Dust(transform.position, 8);
         if (GameSettings.DamageNumbers)

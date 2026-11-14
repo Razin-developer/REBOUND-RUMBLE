@@ -1,0 +1,16 @@
+{
+  "name": "rebound-rumble-multiplayer",
+  "version": "1.0.0",
+  "description": "Co-op relay + friends + presence for REBOUND RUMBLE (WebSocket)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node test.js"
+  },
+  "engines": { "node": ">=18" },
+  "dependencies": {
+    "jsonwebtoken": "^9.0.2",
+    "mongoose": "^8.6.0",
+    "ws": "^8.18.0"
+  }
+}
