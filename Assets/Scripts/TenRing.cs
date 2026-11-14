@@ -16,6 +16,7 @@ public class TenRing : MonoBehaviour
     public static readonly Color Amber = new Color(1f, 0.5f, 0.08f);
 
     public RingState State { get; private set; }
+    public int Index { get { return index; } }
 
     public float speed = 7.5f * GS.S;
     public float damage = 2f;

@@ -230,6 +230,8 @@ public class CoopRing : MonoBehaviour
 {
     public static readonly List<CoopRing> All = new List<CoopRing>();
     public static int Count { get { return All.Count; } }
+    static int nextId = 100;
+    public int Id;
 
     RemoteAvatar owner;
     Vector2 vel;
@@ -257,6 +259,7 @@ public class CoopRing : MonoBehaviour
         go.transform.position = from;
         var r = go.AddComponent<CoopRing>();
         r.owner = owner;
+        r.Id = ++nextId;
         r.born = Time.time;
         r.seed = Random.value * 10f;
         r.curveSign = Random.value < 0.5f ? -1f : 1f;
@@ -415,6 +418,7 @@ public class EnemyGhost : MonoBehaviour
     public Vector2 Target;
     public float Hp01 = 1f;
     public int Flags;
+    float flashUntil;
     Sprite[] frames;
     SpriteRenderer sr;
     float frameTime, animT; int frame;
@@ -449,6 +453,16 @@ public class EnemyGhost : MonoBehaviour
         return g;
     }
 
+    public void SetHp(float h)
+    {
+        if (h < Hp01 - 0.001f)
+        {
+            flashUntil = Time.time + 0.12f;
+            Fx.Blood((Vector2)transform.position + new Vector2(0f, 0.3f), Vector2.up, 5, false, kind == 1);
+        }
+        Hp01 = h;
+    }
+
     public void SetLayer(int lay) { if (sr != null) sr.sortingLayerName = "Layer " + (Mathf.Clamp(lay, 0, 2) + 1); }
 
     public void Die()
@@ -469,24 +483,42 @@ public class EnemyGhost : MonoBehaviour
         if (!moving) { frame = 0; sr.sprite = frames[0]; animT = 0f; }
         else if (animT >= frameTime) { animT = 0f; frame = (frame + 1) % frames.Length; sr.sprite = frames[frame]; }
         if (Mathf.Abs(d.x) > 0.0005f) sr.flipX = d.x < 0f;
-        if ((Flags & 1) != 0) sr.color = Color.Lerp(Color.white, new Color(1f, 0.4f, 0.3f), 0.5f + 0.5f * Mathf.Sin(Time.time * 24f));
+        if (Time.time < flashUntil) sr.color = new Color(1f, 0.35f, 0.35f);
+        else if ((Flags & 1) != 0) sr.color = Color.Lerp(Color.white, new Color(1f, 0.4f, 0.3f), 0.5f + 0.5f * Mathf.Sin(Time.time * 24f));
         else if ((Flags & 2) != 0) sr.color = new Color(1f, 0.7f, 0.7f);
         else sr.color = Difficulty.Frenzy ? new Color(1f, 0.55f, 0.55f) : Color.white;
     }
 }
 
-/// <summary>Guest side: flying rings (gold = host, blue = guest) drawn from snapshots.</summary>
+/// <summary>Guest side: a flying ring (gold = host, blue = guest). Snapshots only give its position ~20x a second,
+/// so it glides toward the newest position, extrapolates along its velocity, has a trail and sparks when it reaches an enemy.</summary>
 public class RingGhost : MonoBehaviour
 {
     SpriteRenderer vsr, gsr;
     Transform visual, glow;
-    Vector2 prev;
-    float seed;
-    bool blue;
+    TrailRenderer trail;
+    Vector2 tgt, vel, cur;
+    float seed, snapT, lastSpark;
+    bool blue, init;
+    public bool Blue { get { return blue; } }
+    public Vector2 Pos { get { return cur; } }
 
-    public static RingGhost Create()
+    static Gradient Grad(bool b)
+    {
+        var grad = new Gradient();
+        if (b) grad.SetKeys(
+            new[] { new GradientColorKey(new Color(0.8f, 0.95f, 1f), 0f), new GradientColorKey(CoopArt.Blue, 0.35f), new GradientColorKey(new Color(0.1f, 0.2f, 0.7f), 1f) },
+            new[] { new GradientAlphaKey(0.95f, 0f), new GradientAlphaKey(0.6f, 0.5f), new GradientAlphaKey(0f, 1f) });
+        else grad.SetKeys(
+            new[] { new GradientColorKey(new Color(1f, 0.95f, 0.6f), 0f), new GradientColorKey(TenRing.Gold, 0.3f), new GradientColorKey(TenRing.Amber, 0.7f), new GradientColorKey(new Color(0.6f, 0.15f, 0.05f), 1f) },
+            new[] { new GradientAlphaKey(0.95f, 0f), new GradientAlphaKey(0.6f, 0.5f), new GradientAlphaKey(0f, 1f) });
+        return grad;
+    }
+
+    public static RingGhost Create(Vector2 pos, bool isBlue)
     {
         var go = new GameObject("Ring Ghost");
+        go.transform.position = pos;
         var r = go.AddComponent<RingGhost>();
         var v = new GameObject("Visual"); v.transform.SetParent(go.transform, false);
         r.visual = v.transform;
@@ -497,30 +529,68 @@ public class RingGhost : MonoBehaviour
         r.gsr = g.AddComponent<SpriteRenderer>();
         r.gsr.sprite = GameAssets.Glow;
         r.gsr.sortingLayerName = GameState.TopLayer; r.gsr.sortingOrder = 501;
+        r.trail = go.AddComponent<TrailRenderer>();
+        r.trail.time = 0.3f;
+        r.trail.widthMultiplier = 0.28f * GS.S;
+        r.trail.widthCurve = AnimationCurve.Linear(0f, 1f, 1f, 0f);
+        r.trail.material = Vfx.ParticleMaterial;
+        r.trail.sortingLayerName = GameState.TopLayer;
+        r.trail.sortingOrder = 500;
         r.seed = Random.value * 10f;
-        r.SetBlue(false, true);
+        r.cur = r.tgt = pos; r.snapT = Time.time;
+        r.SetBlue(isBlue, true);
         return r;
     }
 
-    void SetBlue(bool b, bool force = false)
+    void SetBlue(bool b, bool force)
     {
         if (!force && b == blue) return;
         blue = b;
         vsr.sprite = b ? CoopArt.BlueRingSprite : CoopArt.GoldRingSprite;
         gsr.color = b ? new Color(0.3f, 0.6f, 1f, 0.5f) : new Color(1f, 0.55f, 0.1f, 0.5f);
+        trail.colorGradient = Grad(b);
     }
 
-    public void Place(Vector2 p, bool isBlue)
+    public void SetTarget(Vector2 p, bool isBlue)
     {
-        SetBlue(isBlue);
-        Vector2 cur = transform.position;
-        Vector2 d = p - cur;
-        transform.position = new Vector3(p.x, p.y, 0f);
-        if (d.sqrMagnitude > 0.0004f) visual.localRotation = Quaternion.Euler(0f, 0f, Mathf.Atan2(d.y, d.x) * Mathf.Rad2Deg);
+        SetBlue(isBlue, false);
+        float dt = Mathf.Max(0.02f, Time.time - snapT);
+        if (!init) { init = true; cur = p; transform.position = new Vector3(p.x, p.y, 0f); vel = Vector2.zero; trail.Clear(); }
+        else vel = Vector2.ClampMagnitude((p - tgt) / dt, 30f);
+        tgt = p; snapT = Time.time;
+    }
+
+    public void Pop()
+    {
+        Color c = blue ? CoopArt.Blue : TenRing.Gold;
+        Vfx.Burst(cur, c, 6, 2.2f, 0.1f, 0.25f);
+        Vfx.Shockwave(cur, c, 0.7f, 0.25f);
+        Destroy(gameObject);
+    }
+
+    void Update()
+    {
+        Vector2 goal = tgt + vel * Mathf.Min(Time.time - snapT, 0.1f);
+        cur = (goal - cur).sqrMagnitude > 25f ? goal : Vector2.Lerp(cur, goal, 1f - Mathf.Exp(-28f * Time.deltaTime));
+        Vector2 d = cur - (Vector2)transform.position;
+        transform.position = new Vector3(cur.x, cur.y, 0f);
+        Vector2 face = vel.sqrMagnitude > 0.5f ? vel : d;
+        if (face.sqrMagnitude > 0.0004f) visual.localRotation = Quaternion.Euler(0f, 0f, Mathf.Atan2(face.y, face.x) * Mathf.Rad2Deg);
         float flip = 0.3f + 0.7f * Mathf.Abs(Mathf.Cos(Time.time * 16f + seed));
         float s = 0.55f * GS.S;
         visual.localScale = new Vector3(s * flip, s, 1f);
         glow.localScale = Vector3.one * GS.S * (1.1f + Mathf.Sin(Time.time * 18f + seed) * 0.15f);
+
+        // same impact feel the host gets when a ring reaches an enemy
+        if (Time.time - lastSpark > 0.4f && Coop.GhostNear(cur, 0.45f * GS.S + 0.2f))
+        {
+            lastSpark = Time.time;
+            Color c = blue ? CoopArt.Blue : TenRing.Gold;
+            Vfx.Burst(cur, c, 10, 4f, 0.15f, 0.3f);
+            Vfx.Shockwave(cur, blue ? new Color(0.3f, 0.5f, 1f) : TenRing.Amber, 0.9f, 0.28f);
+            Fx.Slash(cur, face, c, 0.7f, 0.18f);
+            Sfx.Play("ring_clang", 0.5f, 0.9f + Random.value * 0.4f);
+        }
     }
 }
 

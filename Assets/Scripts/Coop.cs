@@ -66,7 +66,9 @@ public class Coop : MonoBehaviour
     // guest side
     static RemoteAvatar hostAvatar;
     static readonly Dictionary<int, EnemyGhost> ghosts = new Dictionary<int, EnemyGhost>();
-    static readonly List<RingGhost> ringGhosts = new List<RingGhost>();
+    static readonly Dictionary<int, RingGhost> ringGhosts = new Dictionary<int, RingGhost>();
+    static readonly HashSet<int> seenRings = new HashSet<int>();
+    static float nextLocalThrow;
     static PickupGhost pickGhost; static string pickKey = "";
     static readonly HashSet<int> seen = new HashSet<int>();
     static string pendingW;
@@ -273,7 +275,7 @@ public class Coop : MonoBehaviour
         if (hostAvatar != null) Destroy(hostAvatar.gameObject); hostAvatar = null;
         foreach (var g in ghosts.Values) if (g != null) Destroy(g.gameObject);
         ghosts.Clear();
-        foreach (var r in ringGhosts) if (r != null) Destroy(r.gameObject);
+        foreach (var r in ringGhosts.Values) if (r != null) Destroy(r.gameObject);
         ringGhosts.Clear();
         if (pickGhost != null) Destroy(pickGhost.gameObject); pickGhost = null; pickKey = "";
         CoopRing.ClearAll();
@@ -316,6 +318,27 @@ public class Coop : MonoBehaviour
 
     public static void NoteThrow() { lastHostThrow = Time.time; }
 
+    public static void NavTick() { if (avatar != null && IsHost) Nav.RefreshPartner(avatar.Pos); }
+
+    /// <summary>Guest: is a ghost enemy near this point? (for ring impact effects)</summary>
+    public static bool GhostNear(Vector2 p, float r)
+    {
+        foreach (var g in ghosts.Values) if (g != null && ((Vector2)g.transform.position - p).sqrMagnitude < r * r) return true;
+        return false;
+    }
+
+    static Vector2 GhostDir(Vector2 from)
+    {
+        EnemyGhost best = null; float bd = float.MaxValue;
+        foreach (var g in ghosts.Values)
+        {
+            if (g == null) continue;
+            float d = ((Vector2)g.transform.position - from).sqrMagnitude;
+            if (d < bd) { bd = d; best = g; }
+        }
+        return best == null ? Vector2.down : ((Vector2)best.transform.position - from).normalized;
+    }
+
     public static void SendHurt(Vector2 away) { if (IsHost) Rt("h|" + F(away.x) + "|" + F(away.y)); }
 
     public static void SendAnnounce(string a, string b, Color c, float secs)
@@ -347,7 +370,7 @@ public class Coop : MonoBehaviour
             else if (avatar.WantThrow && Time.time >= nextThrow && CoopRing.Count < 10) GuestThrow();
         }
 
-        if (Time.unscaledTime - lastHostSend < 1f / 15f) return;
+        if (Time.unscaledTime - lastHostSend < 1f / 20f) return;
         lastHostSend = Time.unscaledTime;
         if (avatar == null || Conn != CoopConn.Online) return;
 
@@ -377,13 +400,13 @@ public class Coop : MonoBehaviour
         {
             if (r == null || r.State == TenRing.RingState.Orbit) continue;
             if (!first) sb.Append(';'); first = false;
-            sb.Append(F(r.transform.position.x)).Append(',').Append(F(r.transform.position.y)).Append(",0");
+            sb.Append(r.Index).Append(',').Append(F(r.transform.position.x)).Append(',').Append(F(r.transform.position.y)).Append(",0");
         }
         foreach (var r in CoopRing.All)
         {
             if (r == null) continue;
             if (!first) sb.Append(';'); first = false;
-            sb.Append(F(r.transform.position.x)).Append(',').Append(F(r.transform.position.y)).Append(",1");
+            sb.Append(r.Id).Append(',').Append(F(r.transform.position.x)).Append(',').Append(F(r.transform.position.y)).Append(",1");
         }
         sb.Append('|').Append(BoostDirector.Snap()).Append('|');
         foreach (var c in Chest.All) sb.Append(c != null && c.Ready ? '1' : '0');
@@ -462,6 +485,12 @@ public class Coop : MonoBehaviour
         Vector2 v = playerRb != null ? playerRb.linearVelocity : Vector2.zero;
         bool thr = act && ((InputHub.MouseHeld && !TouchControls.Active) || InputHub.Held(KeyCode.Space) || TouchControls.ThrowHeld);
         bool vol = act && ((InputHub.RightHeld && !TouchControls.Active) || InputHub.Held(KeyCode.Q) || TouchControls.VolleyHeld);
+        if ((thr || vol) && Time.time >= nextLocalThrow)
+        {
+            nextLocalThrow = Time.time + (vol ? 0.7f : 0.3f);
+            PlayerVisual.Throw(GhostDir(p));          // instant throw pose + sound; the blue rings follow from the host
+            Sfx.Play("ring_throw", 0.5f, vol ? 0.8f : 1.1f);
+        }
         Rt("p|" + F(p.x) + "|" + F(p.y) + "|" + Mathf.Clamp(playerT.gameObject.layer - 20, 0, 2) + "|" + F(v.x) + "|" + F(v.y) + "|" + (Guard.Active ? 1 : 0) + "|" + (thr ? 1 : 0) + "|" + (vol ? 1 : 0));
     }
 
@@ -540,7 +569,7 @@ public class Coop : MonoBehaviour
                 EnemyGhost g;
                 Vector2 pos = new Vector2(Pf(e[2]), Pf(e[3]));
                 if (!ghosts.TryGetValue(id, out g) || g == null) { g = EnemyGhost.Create(Pi(e[1]), pos); ghosts[id] = g; }
-                g.Target = pos; g.Hp01 = Pi(e[4]) / 100f; g.Flags = Pi(e[5]); g.SetLayer(Pi(e[6]));
+                g.Target = pos; g.SetHp(Pi(e[4]) / 100f); g.Flags = Pi(e[5]); g.SetLayer(Pi(e[6]));
                 if (g.kind == 6) { bossHp = g.Hp01; bossEnraged = (g.Flags & 2) != 0; }
             }
         }
@@ -548,21 +577,25 @@ public class Coop : MonoBehaviour
         foreach (var kv in ghosts) if (!seen.Contains(kv.Key)) { if (gone == null) gone = new List<int>(); gone.Add(kv.Key); }
         if (gone != null) foreach (int id in gone) { if (ghosts[id] != null) ghosts[id].Die(); ghosts.Remove(id); }
 
-        // rings
-        int n = 0;
+        // rings (matched by id, so each one glides smoothly)
+        seenRings.Clear();
         if (p[11].Length > 0)
         {
             foreach (string rs in p[11].Split(';'))
             {
                 string[] r = rs.Split(',');
-                if (r.Length < 3) continue;
-                while (ringGhosts.Count <= n) ringGhosts.Add(RingGhost.Create());
-                var rg = ringGhosts[n++];
-                rg.gameObject.SetActive(true);
-                rg.Place(new Vector2(Pf(r[0]), Pf(r[1])), r[2] == "1");
+                if (r.Length < 4) continue;
+                int rid2 = Pi(r[0]) + (r[3] == "1" ? 1000 : 0);
+                seenRings.Add(rid2);
+                Vector2 rp = new Vector2(Pf(r[1]), Pf(r[2]));
+                RingGhost rg;
+                if (!ringGhosts.TryGetValue(rid2, out rg) || rg == null) { rg = RingGhost.Create(rp, r[3] == "1"); ringGhosts[rid2] = rg; }
+                rg.SetTarget(rp, r[3] == "1");
             }
         }
-        for (int i = n; i < ringGhosts.Count; i++) if (ringGhosts[i] != null) ringGhosts[i].gameObject.SetActive(false);
+        List<int> goneRings = null;
+        foreach (var kv in ringGhosts) if (!seenRings.Contains(kv.Key)) { if (goneRings == null) goneRings = new List<int>(); goneRings.Add(kv.Key); }
+        if (goneRings != null) foreach (int rid3 in goneRings) { if (ringGhosts[rid3] != null) ringGhosts[rid3].Pop(); ringGhosts.Remove(rid3); }
 
         // boost orb
         string pk = p[12];

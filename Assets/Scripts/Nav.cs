@@ -26,6 +26,8 @@ public static class Nav
         new Vector2Int(1,1), new Vector2Int(1,-1), new Vector2Int(-1,1), new Vector2Int(-1,-1)
     };
     static Vector2Int lastPlayerCell = new Vector2Int(int.MinValue, 0);
+    static readonly Dictionary<Vector2Int, int> dist2 = new Dictionary<Vector2Int, int>();   // co-op: distance-to-partner field
+    static Vector2Int lastCell2 = new Vector2Int(int.MinValue, 0);
     struct Stair { public Vector2 pos; public int upper, lower; public Dictionary<Vector2Int, int> field; }
     static readonly List<Stair> stairs = new List<Stair>();
     /// <summary>Where the player stood when the map was scanned: fixed reference for the portal.</summary>
@@ -37,8 +39,8 @@ public static class Nav
     static void ResetStatics()
     {
         ground = stone = wall = null; allMaps = null;
-        walkable.Clear(); dist.Clear(); spawnCells.Clear(); upperCells.Clear(); stairs.Clear();
-        lastPlayerCell = new Vector2Int(int.MinValue, 0);
+        walkable.Clear(); dist.Clear(); dist2.Clear(); spawnCells.Clear(); upperCells.Clear(); stairs.Clear();
+        lastPlayerCell = new Vector2Int(int.MinValue, 0); lastCell2 = new Vector2Int(int.MinValue, 0);
     }
 
     static Tilemap Find(string n)
@@ -200,6 +202,21 @@ public static class Nav
         Flood(seed, dist, 70);
     }
 
+    /// <summary>Co-op: the same flood fill, centred on the partner, so enemies can path to either hero.</summary>
+    public static void RefreshPartner(Vector2 pos)
+    {
+        if (!Ready) return;
+        Vector2Int pc = CellOf(pos);
+        if (pc == lastCell2) return;
+        lastCell2 = pc;
+        dist2.Clear();
+        Vector2Int seed = pc;
+        if (!walkable.Contains(seed) && !NearestIn(pc, 4, false, out seed)) return;
+        Flood(seed, dist2, 70);
+    }
+
+    public static Vector2 DirectionPartner(Vector2 pos, Vector2 target, float radius) { return DirField(dist2, pos, target, radius); }
+
     static void Flood(Vector2Int seed, Dictionary<Vector2Int, int> d, int limit = 0)
     {
         var q = new Queue<Vector2Int>();
@@ -235,6 +252,7 @@ public static class Nav
             if (c.GetComponentInParent<Enemy>() != null) continue;
             if (c.GetComponentInParent<PlayerMovement>() != null) continue;
             if (c.GetComponentInParent<TenRing>() != null) continue;
+            if (c.GetComponentInParent<RemoteBody>() != null) continue;
             return false;
         }
         return true;

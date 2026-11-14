@@ -43,6 +43,7 @@ public class EnemySpawner : MonoBehaviour
     {
         if (player == null) return;
         Nav.Refresh(player.position);
+        Coop.NavTick();
         if (Time.time >= nextFar)       // enemies left far behind on the huge map are recycled so the cap is never wasted
         {
             nextFar = Time.time + 1f;

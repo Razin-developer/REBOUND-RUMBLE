@@ -180,7 +180,7 @@ public class Enemy : MonoBehaviour
             int pl = pt.gameObject.layer, el = gameObject.layer;
             Vector2 sd;
             if (pl != el && pl >= 20 && el >= 20 && Nav.StairDirection(pos, el, pl > el, Radius * 0.8f, out sd)) desired = sd;   // other level: walk to the stairs first
-            else desired = Nav.Direction(pos, target, Radius * 0.8f);
+            else desired = (pt != playerT) ? Nav.DirectionPartner(pos, target, Radius * 0.8f) : Nav.Direction(pos, target, Radius * 0.8f);
         }
 
         // stuck on a corner / prop? sidestep for a moment
