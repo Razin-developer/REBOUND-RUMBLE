@@ -26,7 +26,7 @@ public class Cinematic : MonoBehaviour
     static void ResetStatics() { inst = null; Active = false; }
 
     // ------------------------------------------------------------------ data
-    class Line { public float at, extra, typeDur, hold; public string text; public float[] cum; public int ticked; }
+    class Line { public float at, extra, typeDur, hold; public string text; public float[] cum; public int ticked; public bool voPlayed; }
     class Shot { public string name; public float dur; public Action build; public Action<float> tick; public Line[] lines; public Color grade; public bool fadeOut = true; }
     class Lyr { public Transform t; public SpriteRenderer sr; public Vector2 pos; public float par; }
     class Mote { public SpriteRenderer sr; public Vector2 p, v; public float age, life, size, grow, stretch; public Color col; public bool alive; }
@@ -37,6 +37,7 @@ public class Cinematic : MonoBehaviour
     Camera cam;
     Transform stage;
     CineAudio audio;
+    StoryVO story;
     static readonly Vector3 Center = new Vector3(0f, 2000f, 0f);
 
     List<Shot> shots;
@@ -81,6 +82,7 @@ public class Cinematic : MonoBehaviour
         cam.allowHDR = false; cam.allowMSAA = false;
 
         audio = CineAudio.Create(transform);
+        story = StoryVO.Create(transform);
 
         white = new Texture2D(1, 1); white.SetPixel(0, 0, Color.white); white.Apply();
         var v = new Cv(64, 36);
@@ -291,7 +293,8 @@ public class Cinematic : MonoBehaviour
         if (i >= shots.Count) { Finish(); return; }
         var s = shots[i];
         shotDur = s.dur;
-        foreach (var ln in s.lines) { ln.extra = 0f; ln.ticked = 0; }
+        foreach (var ln in s.lines) { ln.extra = 0f; ln.ticked = 0; ln.voPlayed = false; }
+        if (story != null) story.Ambience(i);
         s.build();
         foreach (var l in layers) Place(l);
     }
@@ -301,6 +304,7 @@ public class Cinematic : MonoBehaviour
         if (finishing) return;
         finishing = true;
         audio.Silence();
+        if (story != null) story.Stop();
         Active = false;
         var cb = done;
         Destroy(gameObject);
@@ -319,6 +323,8 @@ public class Cinematic : MonoBehaviour
         if (InputHub.Held(KeyCode.Escape)) skipHold += dt; else skipHold = Mathf.Max(0f, skipHold - dt * 2f);
         if (skipHold >= 0.8f) { Finish(); return; }
 
+        if (InputHub.Pressed(KeyCode.M)) GameSettings.ToggleMute();
+
         // click / space completes the current text line (then fast-forwards its hold)
         if (InputHub.Pressed(KeyCode.Space) || InputHub.Pressed(KeyCode.Return) || InputHub.MouseDown) AdvanceLine();
 
@@ -333,6 +339,7 @@ public class Cinematic : MonoBehaviour
         foreach (var ln in shot.lines)
         {
             float e = shotT - ln.at + ln.extra;
+            if (e >= 0f && !ln.voPlayed) { ln.voPlayed = true; if (story != null) story.Line(shotIdx, System.Array.IndexOf(shot.lines, ln)); }
             if (e < 0f || e > ln.typeDur + 0.05f) continue;
             int n = 0;
             while (n < ln.cum.Length && ln.cum[n] <= e) n++;
@@ -503,6 +510,7 @@ public class Cinematic : MonoBehaviour
         if (skipHold > 0.01f) { R(new Rect(28, H - 14f, 200f, 4f), new Color(1, 1, 1, 0.15f)); R(new Rect(28, H - 14f, 200f * skipHold / 0.8f, 4f), new Color(1f, 0.8f, 0.3f, 0.9f)); }
         GUI.backgroundColor = new Color(0, 0, 0, 0.6f);
         if (GUI.Button(new Rect(W - 150, H - Mathf.Max(barH * 0.5f + 17f, 40f), 120, 34), "SKIP >>", btn)) Finish();
+        if (GUI.Button(new Rect(W - 282, H - Mathf.Max(barH * 0.5f + 17f, 40f), 120, 34), GameSettings.Muted ? "UNMUTE (M)" : "MUTE (M)", btn)) GameSettings.ToggleMute();
         small.alignment = TextAnchor.MiddleCenter;
         GUI.matrix = old;
     }

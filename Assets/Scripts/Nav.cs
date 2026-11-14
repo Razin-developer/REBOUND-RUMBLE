@@ -28,7 +28,7 @@ public static class Nav
     static Vector2Int lastPlayerCell = new Vector2Int(int.MinValue, 0);
     static readonly Dictionary<Vector2Int, int> dist2 = new Dictionary<Vector2Int, int>();   // co-op: distance-to-partner field
     static Vector2Int lastCell2 = new Vector2Int(int.MinValue, 0);
-    struct Stair { public Vector2 pos; public int upper, lower; public Dictionary<Vector2Int, int> field; }
+    struct Stair { public Vector2 pos; public int upper, lower; public Dictionary<Vector2Int, int> field; public Vector2 lowerDir; public float ext; }
     static readonly List<Stair> stairs = new List<Stair>();
     /// <summary>Where the player stood when the map was scanned: fixed reference for the portal.</summary>
     public static Vector2 InitialStart;
@@ -42,6 +42,9 @@ public static class Nav
         walkable.Clear(); dist.Clear(); dist2.Clear(); spawnCells.Clear(); upperCells.Clear(); stairs.Clear();
         lastPlayerCell = new Vector2Int(int.MinValue, 0); lastCell2 = new Vector2Int(int.MinValue, 0);
     }
+
+    /// <summary>Forget the scanned map (used when the active map changes); Init() must be called again.</summary>
+    public static void Reset() { ResetStatics(); }
 
     static Tilemap Find(string n)
     {
@@ -120,6 +123,7 @@ public static class Nav
         var f = new ContactFilter2D(); f.useTriggers = false; f.useLayerMask = false;
         var buf = new Collider2D[8];
 
+        Rect arenaRect = Arena.Instance != null ? Arena.Instance.Bounds : new Rect(0f, 0f, 0f, 0f);
         Vector2Int start = CellOf(playerPos);
         var q = new Queue<Vector2Int>();
         walkable.Add(start); q.Enqueue(start);
@@ -130,7 +134,9 @@ public static class Nav
             {
                 var n = c + d;
                 if (walkable.Contains(n)) continue;
-                if (!IsGround(n) || IsWall(n) || PropBlocked(n, f, buf)) continue;
+                if (!IsGround(n) || IsWall(n)) continue;
+                if (arenaRect.width > 0f && !arenaRect.Contains(CenterOf(n))) continue;   // never walk outside the arena walls
+                if (PropBlocked(n, f, buf)) continue;
                 walkable.Add(n); q.Enqueue(n);
             }
         }
@@ -170,9 +176,32 @@ public static class Nav
             var field = new Dictionary<Vector2Int, int>();
             Vector2Int seed = CellOf(sp), s2;
             if (walkable.Contains(seed)) s2 = seed; else if (!NearestIn(seed, 4, false, out s2)) continue;
-            Flood(s2, field, 45);
-            stairs.Add(new Stair { pos = sp, upper = LayerMask.NameToLayer(st.layerUpper), lower = LayerMask.NameToLayer(st.layerLower), field = field });
+            Flood(s2, field, FloodLimit);
+            // the Cainos trigger only switches level when you ENTER from its lower end (going up) or EXIT through its lower end (going down)
+            // North stairs are not handled by the trigger at all, so they can never be used.
+            if (st.direction == Cainos.PixelArtTopDown_Basic.StairsLayerTrigger.Direction.North) continue;
+            Vector2 ld = Vector2.down; float ext = 0.8f;
+            Vector2 ex = c2 != null ? (Vector2)c2.bounds.extents : new Vector2(0.8f, 0.8f);
+            if (st.direction == Cainos.PixelArtTopDown_Basic.StairsLayerTrigger.Direction.West) { ld = Vector2.left; ext = ex.x; }
+            else if (st.direction == Cainos.PixelArtTopDown_Basic.StairsLayerTrigger.Direction.East) { ld = Vector2.right; ext = ex.x; }
+            else ext = ex.y;
+            stairs.Add(new Stair { pos = sp, upper = LayerMask.NameToLayer(st.layerUpper), lower = LayerMask.NameToLayer(st.layerLower), field = field, lowerDir = ld, ext = Mathf.Max(0.3f, ext) });
         }
+    }
+
+    /// <summary>Flood-fill depth: the whole map when it is small, a big cap when it is huge (so far-away enemies still find their way).</summary>
+    static int FloodLimit { get { return walkable.Count > 30000 ? 220 : 0; } }
+
+    /// <summary>Nearest walkable cell centre (for enemies that ended up inside a prop or off the walkable grid).</summary>
+    public static bool TryNearestWalkable(Vector2 pos, int radius, out Vector2 point)
+    {
+        point = pos;
+        if (!Ready) return false;
+        Vector2Int c = CellOf(pos), n;
+        if (walkable.Contains(c)) { point = CenterOf(c); return true; }
+        if (!NearestIn(c, radius, false, out n)) return false;
+        point = CenterOf(n);
+        return true;
     }
 
     static bool NearestIn(Vector2Int c, int r, bool useDist, out Vector2Int found)
@@ -199,7 +228,7 @@ public static class Nav
         dist.Clear();
         Vector2Int seed = pc;
         if (!walkable.Contains(seed) && !NearestIn(pc, 4, false, out seed)) return;
-        Flood(seed, dist, 70);
+        Flood(seed, dist, FloodLimit);
     }
 
     /// <summary>Co-op: the same flood fill, centred on the partner, so enemies can path to either hero.</summary>
@@ -212,7 +241,7 @@ public static class Nav
         dist2.Clear();
         Vector2Int seed = pc;
         if (!walkable.Contains(seed) && !NearestIn(pc, 4, false, out seed)) return;
-        Flood(seed, dist2, 70);
+        Flood(seed, dist2, FloodLimit);
     }
 
     public static Vector2 DirectionPartner(Vector2 pos, Vector2 target, float radius) { return DirField(dist2, pos, target, radius); }
@@ -279,7 +308,19 @@ public static class Nav
             if (score < best) { best = score; bi = i; }
         }
         if (bi < 0) return false;
-        dir = DirField(stairs[bi].field, pos, stairs[bi].pos, radius);
+        Stair s = stairs[bi];
+        // Cainos trigger: entering from the LOWER end -> upper level; leaving through the LOWER end -> lower level.
+        Vector2 rel = pos - s.pos;
+        float along = Vector2.Dot(rel, s.lowerDir);                 // + = toward the lower end
+        float across = (rel - s.lowerDir * along).magnitude;        // sideways offset from the stair axis
+        Vector2 axis = up ? -s.lowerDir : s.lowerDir;                // direction of travel along the stairs
+        // ON the stairs: keep walking straight along the axis
+        if (Mathf.Abs(along) < s.ext + 0.4f && across < 1.3f) { dir = axis; return true; }
+        // the end you must ENTER from: lower end going up, upper end going down
+        Vector2 mouth = s.pos + s.lowerDir * ((up ? 1f : -1f) * (s.ext + 0.7f));
+        Vector2 toMouth = mouth - pos;
+        if (toMouth.sqrMagnitude < 1.6f * 1.6f) { dir = toMouth.sqrMagnitude < 0.0004f ? axis : toMouth.normalized; return true; }
+        dir = DirField(s.field, pos, s.pos, radius);                // far away: follow the flood field to the stairs
         return true;
     }
 
@@ -296,7 +337,7 @@ public static class Nav
         if (!dist.TryGetValue(c, out cur))
         {
             Vector2Int near;
-            if (!NearestIn(c, 3, true, out near)) return direct;
+            if (!NearestIn(c, 6, true, out near)) return direct;
             c = near; cur = dist[c];
         }
 
@@ -324,6 +365,43 @@ public static class Nav
         if (!haveAim) return direct;
         Vector2 v = aim - pos;
         return v.sqrMagnitude < 0.0001f ? direct : v.normalized;
+    }
+
+    /// <summary>A free walkable cell near a map edge (`outward` = +x / -x / +y / -y) with room around it, away from `avoid`.</summary>
+    public static bool TryEdgeCell(Vector2 outward, Vector2 avoid, float avoidR, out Vector2 point)
+    {
+        point = Vector2.zero;
+        if (!Ready || spawnCells.Count == 0) return false;
+        float best = float.MinValue;
+        for (int i = 0; i < spawnCells.Count; i++) { float s = Vector2.Dot(spawnCells[i], outward); if (s > best) best = s; }
+        var f = new ContactFilter2D(); f.useTriggers = false; f.useLayerMask = false;
+        var buf = new Collider2D[4];
+        var cand = new List<Vector2>();
+        for (float slack = 3f; slack <= 18f; slack += 3f)
+        {
+            cand.Clear();
+            for (int i = 0; i < spawnCells.Count; i++)
+                if (Vector2.Dot(spawnCells[i], outward) >= best - slack && Vector2.Distance(spawnCells[i], avoid) >= avoidR) cand.Add(spawnCells[i]);
+            for (int t = 0; t < 120 && cand.Count > 0; t++)
+            {
+                Vector2 p = cand[Random.Range(0, cand.Count)];
+                if (Physics2D.OverlapCircle(p, 1.6f, f, buf) > 0) continue;
+                point = p; return true;
+            }
+        }
+        return false;
+    }
+
+    /// <summary>Remove a disc of ground from navigation (the harbour lagoon is water).</summary>
+    public static void CarveOut(Vector2 c, float r)
+    {
+        if (!Ready) return;
+        float r2 = r * r;
+        spawnCells.RemoveAll(p => (p - c).sqrMagnitude < r2);
+        var gone = new List<Vector2Int>();
+        foreach (var w in walkable) if ((CenterOf(w) - c).sqrMagnitude < r2) gone.Add(w);
+        foreach (var w in gone) walkable.Remove(w);
+        lastPlayerCell = new Vector2Int(int.MinValue, 0); lastCell2 = new Vector2Int(int.MinValue, 0);
     }
 
     /// <summary>A free walkable cell whose distance from `target` is within [minD, maxD].</summary>

@@ -34,6 +34,10 @@ public class PlayerHealth : MonoBehaviour
 
     void BeginRun()
     {
+        // always start on the ground level (an earlier run may have ended upstairs)
+        int l1 = LayerMask.NameToLayer(GameState.ActorLayer);
+        if (l1 >= 0) gameObject.layer = l1;
+        if (allSr != null) foreach (var s in allSr) if (s != null) s.sortingLayerName = GameState.ActorLayer;
         transform.position = startPos;
         if (rb != null) { rb.position = startPos; rb.linearVelocity = Vector2.zero; }
         spawnTime = Time.time;
@@ -42,6 +46,9 @@ public class PlayerHealth : MonoBehaviour
         Vfx.Burst(startPos + Vector3.up * 0.4f, new Color(1f, 0.85f, 0.3f), 24, 4f, 0.16f, 0.6f);
         Sfx.Play("spawn", 0.8f, 1f);
     }
+
+    /// <summary>The map changed: this is where every run starts now.</summary>
+    public void SetStart(Vector2 p) { startPos = new Vector3(p.x, p.y, transform.position.z); }
 
     public void Invuln(float seconds) { invulnUntil = Mathf.Max(invulnUntil, Time.time + seconds); }
 

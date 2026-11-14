@@ -4,14 +4,14 @@ using System.Globalization;
 using System.Text;
 using UnityEngine;
 
-[Serializable] public class CoopPlayer { public string user; public int suit; public bool host; }
+[Serializable] public class CoopPlayer { public string user; public int suit; public bool host; public bool lobby; }
 [Serializable] public class CoopFriend { public string user; public bool online; public string room; }
 [Serializable] public class CoopName { public string user; }
 [Serializable]
 public class CoopMsg
 {
     public string t, msg, code, user, from, d, role, why, db;
-    public int suit;
+    public int suit, map;
     public bool started;
     public CoopPlayer[] players;
     public CoopFriend[] friends;
@@ -45,6 +45,8 @@ public class Coop : MonoBehaviour
     public static string InviteFrom = "", InviteCode = "";
     public static float InviteUntil;
     public static float GuestMoveMul = 1f;
+    public static bool RoomStarted;            // a run is in progress in this room
+    public static bool LobbyVisible;           // the UI sets this every frame while the lobby screen is showing
 
     public static bool IsGuest { get { return InRun && Role == CoopRole.Guest; } }
     public static bool IsHost { get { return InRun && Role == CoopRole.Host; } }
@@ -56,7 +58,8 @@ public class Coop : MonoBehaviour
     // ------------------------------------------------------------------ internals
     static WebSock sock;
     static float connectStart, lastPing, lastSnap, lastW, lastGuestSend, lastHostSend, lastHostThrow;
-    static bool helloSent, skipLeave, remoteEnd;
+    static bool helloSent, skipLeave, remoteEnd, starting, runOver, sentLobby;
+    static string sentLobbyRoom = "";
     static int myRid = -1;
     static Coop inst;
 
@@ -82,6 +85,7 @@ public class Coop : MonoBehaviour
         Conn = CoopConn.Off; Role = CoopRole.None; InRun = PendingStart = WantLobby = false;
         RoomCode = Info = Err = ""; Members.Clear(); Friends.Clear(); Requests.Clear(); Sent.Clear();
         InviteFrom = InviteCode = ""; InviteUntil = 0f; GuestMoveMul = 1f;
+        RoomStarted = LobbyVisible = starting = runOver = sentLobby = false; sentLobbyRoom = "";
         sock = null; helloSent = skipLeave = remoteEnd = false; myRid = -1; inst = null;
         avatar = null; hostAvatar = null; ghosts.Clear(); ringGhosts.Clear(); pickGhost = null; pickKey = ""; pendingW = null;
     }
@@ -127,7 +131,48 @@ public class Coop : MonoBehaviour
         if (InRun) { skipLeave = true; GameState.ReturnToMenu(false); }
     }
 
-    static void ClearRoom() { RoomCode = ""; Members.Clear(); Role = CoopRole.None; }
+    static void ClearRoom() { RoomCode = ""; Members.Clear(); Role = CoopRole.None; RoomStarted = false; starting = false; PendingStart = false; sentLobby = false; sentLobbyRoom = ""; }
+
+    // ------------------------------------------------------------------ lobby rules
+    static CoopPlayer Partner { get { foreach (var p in Members) if (Role == CoopRole.Host ? !p.host : p.host) return p; return null; } }
+    static CoopPlayer Me { get { foreach (var p in Members) if (Role == CoopRole.Host ? p.host : !p.host) return p; return null; } }
+
+    /// <summary>The host may press START only when both players are standing in the lobby and no run is going.</summary>
+    public static bool CanStart
+    {
+        get
+        {
+            if (Role != CoopRole.Host || InRun || PendingStart || starting || RoomStarted || Conn != CoopConn.Online) return false;
+            if (Members.Count < 2) return false;
+            foreach (var p in Members) if (!p.lobby) return false;
+            return true;
+        }
+    }
+
+    /// <summary>One line that says why START is (not) available / what we are waiting for.</summary>
+    public static string LobbyHint
+    {
+        get
+        {
+            var other = Partner;
+            if (Role == CoopRole.Host)
+            {
+                if (Members.Count < 2) return "WAITING FOR A FRIEND TO JOIN...";
+                if (starting || PendingStart) return "STARTING...";
+                if (RoomStarted) return "A RUN IS STILL FINISHING...";
+                if (other != null && !other.lobby) return "WAITING FOR " + other.user.ToUpper() + " TO REACH THE LOBBY...";
+                var me = Me; if (me != null && !me.lobby) return "GETTING READY...";
+                return "READY - PRESS START";
+            }
+            if (other == null) return "WAITING FOR THE HOST...";
+            if (starting || PendingStart) return "STARTING...";
+            if (!other.lobby) return other.user.ToUpper() + " IS STILL IN THE GAME - WAIT FOR THE LOBBY";
+            return "WAITING FOR " + other.user.ToUpper() + " TO START...";
+        }
+    }
+
+    /// <summary>Host presses START: the server checks that both are in the lobby and starts everybody together.</summary>
+    public static void RequestStart() { if (CanStart) Cmd("start"); }
 
     static string Esc(string s) { return (s ?? "").Replace("\\", "\\\\").Replace("\"", "\\\""); }
     static void Send(string json) { if (sock != null && sock.IsOpen) sock.Send(json); }
@@ -166,8 +211,23 @@ public class Coop : MonoBehaviour
             if (Net.State != AccountState.LoggedIn && Conn != CoopConn.Off) Disconnect();
         }
 
+        ReportLobby();
         if (!InRun) return;
+        runOver = GameState.Over;
         if (IsHost) HostUpdate(); else GuestUpdate();
+    }
+
+    /// <summary>Tell the server whether we are looking at the lobby (it uses this to decide if the host may start).</summary>
+    void ReportLobby()
+    {
+        bool visible = LobbyVisible; LobbyVisible = false;       // the lobby UI sets it again next frame while it is on screen
+        if (Conn != CoopConn.Online || !InRoom || sock == null || !sock.IsOpen) { if (!InRoom) { sentLobby = false; sentLobbyRoom = ""; } return; }
+        bool want = visible && !InRun && !starting && !PendingStart && GameState.Mode == GameMode.Menu;
+        if (want != sentLobby || sentLobbyRoom != RoomCode)
+        {
+            sentLobby = want; sentLobbyRoom = RoomCode;
+            Send("{\"t\":\"lobby\",\"on\":" + (want ? "true" : "false") + "}");
+        }
     }
 
     void Handle(CoopMsg m)
@@ -193,6 +253,7 @@ public class Coop : MonoBehaviour
                 Role = m.role == "host" ? CoopRole.Host : CoopRole.Guest;
                 Members.Clear();
                 if (m.players != null) Members.AddRange(m.players);
+                RoomStarted = m.started;
                 Err = "";
                 break;
             case "left": ClearRoom(); break;
@@ -200,6 +261,7 @@ public class Coop : MonoBehaviour
                 Info = (m.why ?? "ROOM CLOSED").ToUpper();
                 if (InRun) { skipLeave = true; GameState.ReturnToMenu(false); }
                 ClearRoom();
+                WantLobby = false;
                 break;
             case "peer_joined": Info = (m.user ?? "?").ToUpper() + " JOINED YOUR ROOM"; break;
             case "peer_left":
@@ -209,9 +271,13 @@ public class Coop : MonoBehaviour
             case "start":
                 Role = m.role == "host" ? CoopRole.Host : CoopRole.Guest;
                 Members.Clear(); if (m.players != null) Members.AddRange(m.players);
+                RoomStarted = true;
+                starting = true; sentLobby = false;
                 PendingStart = true;
                 break;
             case "ended":
+                // the host's run is over: everybody goes back to the lobby (we stay in the room)
+                PendingStart = false; starting = false; RoomStarted = false;
                 if (InRun && Role == CoopRole.Guest) { remoteEnd = true; GameState.ReturnToMenu(false); }
                 break;
             case "invite": InviteFrom = m.from ?? "?"; InviteCode = m.code ?? ""; InviteUntil = Time.unscaledTime + 25f; break;
@@ -223,7 +289,7 @@ public class Coop : MonoBehaviour
     /// <summary>Called by the UI after the transition to the arena.</summary>
     public static void BeginRun()
     {
-        InRun = true;
+        InRun = true; starting = false; runOver = false;
         myRid = -1; lastSnap = Time.unscaledTime; lastW = -99f; pendingW = null;
         GuestMoveMul = 1f;
         GameState.StartRun();
@@ -255,13 +321,18 @@ public class Coop : MonoBehaviour
 
     void OnMenu()
     {
-        bool was = InRun;
-        InRun = false;
+        bool was = InRun, wasOver = runOver;
+        InRun = false; starting = false; PendingStart = false; runOver = false;
         DestroyWorld();
         if (was && Conn == CoopConn.Online)
         {
-            if (Role == CoopRole.Host && !remoteEnd) Cmd("ended");
-            else if (Role == CoopRole.Guest && !skipLeave) { Cmd("leave"); ClearRoom(); }
+            if (Role == CoopRole.Host && !remoteEnd) { RoomStarted = false; Cmd("ended"); }     // everybody back to the lobby
+            else if (Role == CoopRole.Guest && !skipLeave)
+            {
+                // run already over (or the host ended it): stay in the room and go to the lobby.
+                // quitting a run that is still going on means leaving the room (the host plays on alone).
+                if (!(remoteEnd || wasOver)) { Cmd("leave"); ClearRoom(); }
+            }
         }
         WantLobby = RoomCode.Length > 0;
         skipLeave = false; remoteEnd = false;

@@ -60,7 +60,7 @@ public class EnemySpawner : MonoBehaviour
 
         float t = GameState.RunTime;
         int cap = Mathf.Min(MaxEnemies + Coop.ExtraCap, 5 + (Coop.HasAvatar ? 4 : 0) + (int)(t / 15f) + GameState.Kills / 40 + (Difficulty.Frenzy ? 3 : 0));
-        float interval = Mathf.Max(0.45f, (2.2f - t * 0.01f) / Difficulty.SpawnRate);
+        float interval = Mathf.Max(0.45f, (2.2f - t * 0.01f) / (Difficulty.SpawnRate));
         nextSpawn = Time.time + interval * Random.Range(0.8f, 1.2f);
         if (Enemy.All.Count >= cap) return;
         SpawnGroup(t);

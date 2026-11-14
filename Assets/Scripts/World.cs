@@ -24,15 +24,43 @@ public class World : MonoBehaviour
     public static float PortalProgress;
     public static bool NearPortal;
 
+    static World instance;
+
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
-    static void ResetStatics() { PortalProgress = 0f; NearPortal = false; }
+    static void ResetStatics() { PortalProgress = 0f; NearPortal = false; instance = null; }
 
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
     static void Install() { new GameObject("World").AddComponent<World>(); }
 
     IEnumerator Start()
     {
+        instance = this;
         yield return null;
+        yield return Build();
+    }
+
+    /// <summary>Drop the old chests / portal, rescan navigation, and place everything again.</summary>
+    public static void Rebuild()
+    {
+        if (instance == null) return;
+        instance.StopAllCoroutines();
+        instance.StartCoroutine(instance.RebuildRoutine());
+    }
+
+    IEnumerator RebuildRoutine()
+    {
+        foreach (var c in new List<Chest>(Chest.All)) if (c != null) Destroy(c.gameObject);
+        Chest.All.Clear();
+        Portal.Clear();
+        yield return null;                 // let the new map's colliders register
+        GameObject p = GameObject.FindWithTag("Player");
+        if (p != null) { Physics2D.SyncTransforms(); Nav.Reset(); Nav.Init(p.transform.position); }
+        yield return Build();
+        RunePillars.Rescan();
+    }
+
+    IEnumerator Build()
+    {
         GameObject p = GameObject.FindWithTag("Player");
         if (p == null) yield break;
         Vector2 start = p.transform.position;
@@ -53,7 +81,7 @@ public class World : MonoBehaviour
         var placed = new List<Vector2> { start };
         if (havePortal) placed.Add(portalPos);
         int made = 0;
-        for (int tries = 0; tries < 120 && made < 5; tries++)
+        for (int tries = 0; tries < 120 && made < 5 && !Coop.IsGuest; tries++)
         {
             if (!Nav.TryFreeCellNear(start, 10f, 80f, out pos)) continue;
             bool far = true;
@@ -65,12 +93,13 @@ public class World : MonoBehaviour
         }
 
         // treasure chest: right beside the portal
-        if (havePortal)
+        if (havePortal && !Coop.IsGuest)
         {
             var st = Random.state; Random.InitState(7);   // same treasure spot beside the portal every run
             if (Nav.TryFreeCellNear(portalPos, 1.8f, 3.4f, out pos)) Chest.Create(pos, ChestKind.Treasure);
             Random.state = st;
         }
+        Shrine.Scan();
     }
 }
 
@@ -102,9 +131,21 @@ public class Portal : MonoBehaviour
     int frame;
 
     public static Portal Current;
+    GameObject glowGo;
 
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
     static void ResetPortal() { Current = null; }
+
+    /// <summary>Remove the current exit (map change). The altar prop itself stays; only the portal behaviour and its glow go.</summary>
+    public static void Clear()
+    {
+        if (Current == null) { Current = null; return; }
+        if (Current.existing) Destroy(Current); else Destroy(Current.gameObject);
+        Current = null;
+        World.PortalProgress = 0f; World.NearPortal = false;
+    }
+
+    void OnDestroy() { if (glowGo != null) Destroy(glowGo); }
 
     public static Portal Create(Vector2 pos)
     {
@@ -121,6 +162,7 @@ public class Portal : MonoBehaviour
         GameObject p = GameObject.FindWithTag("Player");
         if (p != null) player = p.transform;
         var g = new GameObject("Glow");
+        glowGo = g;
         var gsr = g.AddComponent<SpriteRenderer>();
         gsr.sprite = GameAssets.Glow;
         gsr.color = new Color(1f, 0.55f, 0.1f, 0.35f);

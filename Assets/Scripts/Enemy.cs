@@ -31,6 +31,7 @@ public class Enemy : MonoBehaviour
     Transform barRoot, barFill;
     SpriteRenderer[] barRenderers;
     float barWidth = 0.8f;
+    int stuckCount; float lastStuckAt;   // escalating un-stick (see FixedUpdate)
     int dashState;               // wasp: 0 chase, 1 wind-up, 2 dash
     float dashUntil, nextDash;
     static PhysicsMaterial2D slick;
@@ -189,8 +190,19 @@ public class Enemy : MonoBehaviour
         if (stuckTime > 0.4f)
         {
             stuckTime = 0f;
+            // 1st time: slide sideways along the obstacle. Stuck again within 3s: recompute the route now and, if the enemy
+            // is not on the walkable grid (pushed into a prop / corner), walk it back to the nearest walkable cell.
+            stuckCount = (Time.time - lastStuckAt < 3f) ? stuckCount + 1 : 1;
+            lastStuckAt = Time.time;
             sideStep = new Vector2(-desired.y, desired.x) * (Random.value < 0.5f ? -1f : 1f);
             sideUntil = Time.time + 0.5f;
+            if (stuckCount >= 2)
+            {
+                nextPath = 0f;
+                Vector2 back;
+                if (Nav.TryNearestWalkable(pos, 6, out back) && (back - pos).sqrMagnitude > 0.05f * 0.05f) { sideStep = (back - pos).normalized; sideUntil = Time.time + 0.7f; }
+                else if (stuckCount >= 4) { sideStep = Random.insideUnitCircle.normalized; sideUntil = Time.time + 1.0f; }
+            }
         }
 
         Vector2 dir = desired;

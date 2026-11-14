@@ -70,7 +70,10 @@ function newCode() {
   return null;
 }
 const send = (c, obj) => { if (c && c.ws.readyState === 1) c.ws.send(JSON.stringify(obj)); };
-const roomInfo = (r) => ({ code: r.code, players: r.members.map((m) => ({ user: m.user, suit: m.suit, host: m === r.members[0] })), started: r.started });
+const roomInfo = (r) => ({ code: r.code, players: r.members.map((m) => ({ user: m.user, suit: m.suit, host: m === r.members[0], lobby: !!m.lobby })), started: r.started, map: r.map | 0 });
+// tell everybody in the room what the room looks like now (who is in the lobby, started or not, which map)
+const pushRoom = (r) => { for (const x of r.members) send(x, { t: 'room', ...roomInfo(r), role: x === r.members[0] ? 'host' : 'guest' }); };
+const clampMap = (v) => Math.max(0, Math.min(8, parseInt(v, 10) || 0));
 
 async function friendsFor(c) {
   const me = c.key;
@@ -95,7 +98,7 @@ async function pushToFriendsOf(c) {
 
 function leaveRoom(c, why) {
   const r = c.room; if (!r) return;
-  c.room = null;
+  c.room = null; c.lobby = false;
   const idx = r.members.indexOf(c);
   if (idx < 0) return;
   if (idx === 0) {                       // host left: the room is over
@@ -104,7 +107,7 @@ function leaveRoom(c, why) {
   } else {
     r.members.splice(idx, 1);
     send(r.members[0], { t: 'peer_left', user: c.user });
-    send(r.members[0], { t: 'room', ...roomInfo(r), role: 'host' });
+    pushRoom(r);
   }
   pushToFriendsOf(c);
 }
@@ -133,7 +136,8 @@ async function onMessage(c, m) {
     case 'create': {
       leaveRoom(c);
       const code = newCode(); if (!code) return send(c, { t: 'error', msg: 'No free room codes, try again' });
-      const r = { code, members: [c], started: false, born: Date.now() };
+      const r = { code, members: [c], started: false, map: clampMap(m.map), born: Date.now() };
+      c.lobby = false;                                   // becomes true when the client reports it is looking at the lobby
       rooms.set(code, r); c.room = r;
       send(c, { t: 'room', ...roomInfo(r), role: 'host' });
       pushToFriendsOf(c);
@@ -145,23 +149,49 @@ async function onMessage(c, m) {
       if (!r) return send(c, { t: 'error', code: 'nocode', msg: 'No room with that code' });
       if (r.members.includes(c)) return;
       if (r.members.length >= 2) return send(c, { t: 'error', code: 'full', msg: 'That room is full' });
-      if (r.started) return send(c, { t: 'error', code: 'started', msg: 'That game already started' });
+      if (r.started) return send(c, { t: 'error', code: 'started', msg: 'That game is in progress - try again when they are back in the lobby' });
       leaveRoom(c);
+      c.lobby = false;
       r.members.push(c); c.room = r;
-      for (const x of r.members) send(x, { t: 'room', ...roomInfo(r), role: x === r.members[0] ? 'host' : 'guest' });
+      pushRoom(r);
       send(r.members[0], { t: 'peer_joined', user: c.user, suit: c.suit });
       pushToFriendsOf(c);
       break;
     }
     case 'leave': leaveRoom(c); send(c, { t: 'left' }); break;
+    case 'lobby': {                       // a client tells us whether it is looking at the lobby screen right now
+      const r = c.room; if (!r) return;
+      const on = m.on === true;
+      if (c.lobby === on) return;
+      c.lobby = on;
+      pushRoom(r);
+      break;
+    }
+    case 'map': {                         // the host picks the map for the next run
+      const r = c.room; if (!r || r.members[0] !== c || r.started) return;
+      const v = clampMap(m.map);
+      if (r.map === v) return;
+      r.map = v; pushRoom(r);
+      break;
+    }
     case 'start': {
       const r = c.room; if (!r || r.members[0] !== c) return;
+      if (r.started) return send(c, { t: 'error', code: 'running', msg: 'A run is already in progress' });
       if (r.members.length < 2) return send(c, { t: 'error', msg: 'Waiting for your friend to join' });
+      const slow = r.members.find((x) => !x.lobby);       // everybody must be back in the lobby first
+      if (slow) return send(c, { t: 'error', code: 'notready', msg: 'Waiting for ' + slow.user + ' to reach the lobby' });
       r.started = true;
+      for (const x of r.members) x.lobby = false;
       for (const x of r.members) send(x, { t: 'start', ...roomInfo(r), role: x === c ? 'host' : 'guest' });
       break;
     }
-    case 'ended': { const r = c.room; if (r && r.members[0] === c) { r.started = false; for (const x of r.members) if (x !== c) send(x, { t: 'ended' }); } break; }
+    case 'ended': {                       // the host's run is over (died / quit): everybody goes back to the lobby
+      const r = c.room; if (!r || r.members[0] !== c) return;
+      r.started = false;
+      for (const x of r.members) if (x !== c) send(x, { t: 'ended' });
+      pushRoom(r);
+      break;
+    }
     case 'rt': {          // relay game data to the other player (opaque string)
       const r = c.room; if (!r) return;
       const other = r.members.find((x) => x !== c);
@@ -195,6 +225,8 @@ async function onMessage(c, m) {
     case 'invite': {
       const target = lower(m.user);
       if (!c.room) return send(c, { t: 'error', msg: 'Create a room first' });
+      if (c.room.started) return send(c, { t: 'error', msg: 'A run is in progress - invite after you are back in the lobby' });
+      if (c.room.members.length >= 2) return send(c, { t: 'error', msg: 'Your room is already full' });
       const rows = await store.rows(c.key);
       if (!rows.find((r) => r.status === 'accepted' && (r.a === target || r.b === target))) return send(c, { t: 'error', msg: 'You can only invite friends' });
       const o = online.get(target);

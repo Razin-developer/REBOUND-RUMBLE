@@ -19,6 +19,7 @@ public static class GameSettings
     // temporary profile (not saved yet)
     public static string ProfileName = "PLAYER";
     public static int AvatarIndex = 0;
+    public static bool Muted;                  // master mute (M key / MUTE buttons); remembered between sessions
     public static int Costume = 0;
     public static int Variant = 0;             // suit colour: 0 classic, 1 ice, 2 jade, 3 violet
     public static int Suit { get { return Suits.Make(Costume, Variant); } }
@@ -37,6 +38,7 @@ public static class GameSettings
         if (loaded) return;
         loaded = true;
         Master = PlayerPrefs.GetFloat("rr_master", Master);
+        Muted = PlayerPrefs.GetInt("rr_mute", 0) == 1;
         SfxVol = PlayerPrefs.GetFloat("rr_sfx", SfxVol);
         MusicVol = PlayerPrefs.GetFloat("rr_music", MusicVol);
         FpsIndex = PlayerPrefs.GetInt("rr_fps", FpsIndex);
@@ -55,6 +57,7 @@ public static class GameSettings
     public static void Save()
     {
         PlayerPrefs.SetFloat("rr_master", Master);
+        PlayerPrefs.SetInt("rr_mute", Muted ? 1 : 0);
         PlayerPrefs.SetFloat("rr_sfx", SfxVol);
         PlayerPrefs.SetFloat("rr_music", MusicVol);
         PlayerPrefs.SetInt("rr_fps", FpsIndex);
@@ -70,9 +73,17 @@ public static class GameSettings
         PlayerPrefs.Save();
     }
 
+    public static void ToggleMute()
+    {
+        Muted = !Muted;
+        PlayerPrefs.SetInt("rr_mute", Muted ? 1 : 0);
+        AudioListener.volume = Muted ? 0f : Mathf.Clamp01(Master);
+        PlayerPrefs.Save();
+    }
+
     public static void Apply()
     {
-        AudioListener.volume = Mathf.Clamp01(Master);
+        AudioListener.volume = Muted ? 0f : Mathf.Clamp01(Master);
         MusicPlayer.Refresh();
         FpsIndex = Mathf.Clamp(FpsIndex, 0, FpsOptions.Length - 1);
         QualitySettings.vSyncCount = VSync ? 1 : 0;

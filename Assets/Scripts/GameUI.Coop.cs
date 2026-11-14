@@ -78,6 +78,7 @@ public partial class GameUI
         }
         else
         {
+            Coop.LobbyVisible = true;     // tells the server this player is standing in the lobby
             Text(new Rect(lx, r.y + 92, lw, 22), "ROOM CODE", small, new Color(1, 1, 1, 0.6f));
             Text(new Rect(lx, r.y + 112, lw, 70), Coop.RoomCode, title, Gold, TextAnchor.MiddleLeft, 56);
             for (int i = 0; i < 2; i++)
@@ -89,19 +90,20 @@ public partial class GameUI
                     var m = Coop.Members[i];
                     Rect(new Rect(row.x + 8, row.y + 8, 24, 24), Suits.Tint(m.suit) == Color.white ? new Color(0.9f, 0.85f, 0.7f) : Suits.Tint(m.suit));
                     Text(new Rect(row.x + 42, row.y, 190, 40), m.user.ToUpper(), label, m.host ? Gold : blue, TextAnchor.MiddleLeft, 13);
-                    Text(new Rect(row.x + 230, row.y, 160, 40), (m.host ? "HOST  GOLD RINGS" : "GUEST  BLUE RINGS"), small, new Color(1, 1, 1, 0.55f), TextAnchor.MiddleRight);
+                    Text(new Rect(row.x + 230, row.y, 160, 40), (m.host ? "HOST  " : "GUEST  ") + (m.lobby ? "IN LOBBY" : (Coop.RoomStarted ? "IN GAME" : "FINISHING UP")), small, m.lobby ? Color.green : new Color(1f, 0.75f, 0.35f), TextAnchor.MiddleRight);
                 }
                 else Text(new Rect(row.x + 14, row.y, lw - 20, 40), "WAITING FOR A FRIEND...", small, new Color(1, 1, 1, 0.4f), TextAnchor.MiddleLeft);
             }
             if (Coop.Role == CoopRole.Host)
             {
-                GUI.enabled = Coop.Members.Count >= 2;
-                if (Button(new Rect(lx, r.y + 300, lw, 56), "START CO-OP RUN")) Coop.Cmd("start");
+                GUI.enabled = Coop.CanStart;
+                if (Button(new Rect(lx, r.y + 300, lw, 56), "START CO-OP RUN")) Coop.RequestStart();
                 GUI.enabled = true;
+                Text(new Rect(lx, r.y + 344, lw, 20), Coop.LobbyHint, small, Coop.CanStart ? Color.green : new Color(1f, 0.75f, 0.35f), TextAnchor.MiddleCenter);
             }
-            else Text(new Rect(lx, r.y + 304, lw, 50), "WAITING FOR THE HOST TO START...", label, blue, TextAnchor.MiddleCenter, 12);
-            if (Button(new Rect(lx, r.y + 366, lw, 40), "LEAVE ROOM", btnSmall)) Coop.Cmd("leave");
-            Text(new Rect(lx, r.y + 412, lw, 40), "SHARE THE CODE OR INVITE A FRIEND FROM THE LIST", small, new Color(1, 1, 1, 0.4f));
+            else Text(new Rect(lx, r.y + 304, lw, 50), Coop.LobbyHint, label, blue, TextAnchor.MiddleCenter, 12);
+            if (Button(new Rect(lx, r.y + 418, lw, 40), "LEAVE ROOM", btnSmall)) Coop.Cmd("leave");
+            Text(new Rect(lx, r.y + 464, lw, 40), "SHARE THE CODE OR INVITE A FRIEND FROM THE LIST", small, new Color(1, 1, 1, 0.4f));
         }
 
         // ---------------------------------------------------------------- right: friends

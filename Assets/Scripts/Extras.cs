@@ -33,6 +33,18 @@ public class RunePillars : MonoBehaviour
     void Start()
     {
         inst = this;
+        Discover();
+        GameState.OnRunStart += ResetRun;
+        GameState.OnReturnToMenu += ResetRun;
+    }
+
+    /// <summary>The map changed: forget the old pillars and look again (the one nearest the player's start is kept).</summary>
+    public static void Rescan() { if (inst != null) inst.Discover(); }
+
+    void Discover()
+    {
+        foreach (var q in pillars) if (q != null && q.glow != null) Destroy(q.glow.gameObject);
+        pillars.Clear(); Attuned = 0;
         var p = GameObject.FindWithTag("Player");
         if (p != null) player = p.transform;
         foreach (var t in FindObjectsByType<Transform>())
@@ -77,8 +89,6 @@ public class RunePillars : MonoBehaviour
             pillars.Clear(); pillars.Add(keep);
         }
         Total = pillars.Count;
-        GameState.OnRunStart += ResetRun;
-        GameState.OnReturnToMenu += ResetRun;
     }
 
     void OnDestroy() { GameState.OnRunStart -= ResetRun; GameState.OnReturnToMenu -= ResetRun; }

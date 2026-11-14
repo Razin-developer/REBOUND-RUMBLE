@@ -21,12 +21,20 @@ public static class BuildTools
         AddScene();
         PlayerSettings.WebGL.compressionFormat = WebGLCompressionFormat.Disabled;   // itch.io-friendly (no server header setup needed)
         PlayerSettings.WebGL.dataCaching = true;
+        PlayerSettings.WebGL.template = "APPLICATION:Default";   // Minimal leaves a small canvas on a white page
         PlayerSettings.defaultWebScreenWidth = 1280;
         PlayerSettings.defaultWebScreenHeight = 720;
         PlayerSettings.runInBackground = false;
 
+        // The old build folder is often locked (a local web server, a browser tab or an Explorer window is using it): then build into a fresh folder instead of failing.
+        string stamp = System.DateTime.Now.ToString("yyyyMMdd_HHmmss");
         string dir = Path.GetFullPath("Builds/WebGL");
-        if (Directory.Exists(dir)) Directory.Delete(dir, true);
+        try { if (Directory.Exists(dir)) Directory.Delete(dir, true); }
+        catch (System.Exception e)
+        {
+            dir = Path.GetFullPath("Builds/WebGL_" + stamp);
+            Debug.LogWarning("[Build] Builds/WebGL is in use (" + e.Message + "). Building into " + dir + " instead.");
+        }
         var report = BuildPipeline.BuildPlayer(new BuildPlayerOptions
         {
             scenes = new[] { ScenePath },
@@ -40,7 +48,8 @@ public static class BuildTools
             return;
         }
         string zip = Path.GetFullPath("Builds/ReboundRumble-itch.zip");
-        if (File.Exists(zip)) File.Delete(zip);
+        try { if (File.Exists(zip)) File.Delete(zip); }
+        catch (System.Exception) { zip = Path.GetFullPath("Builds/ReboundRumble-itch_" + stamp + ".zip"); }
         System.IO.Compression.ZipFile.CreateFromDirectory(dir, zip, System.IO.Compression.CompressionLevel.Optimal, false);
         Debug.Log("[Build] Upload this to itch.io (kind of project: HTML): " + zip);
         EditorUtility.RevealInFinder(zip);

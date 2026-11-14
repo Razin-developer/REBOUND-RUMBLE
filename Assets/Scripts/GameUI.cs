@@ -47,6 +47,7 @@ public partial class GameUI : MonoBehaviour
         if (page != lastPage) { lastPage = page; pageStart = Time.unscaledTime; }
         UpdateFlow();
         CoopTick();
+        if (InputHub.Pressed(KeyCode.M) && GUIUtility.keyboardControl == 0 && !Cinematic.Active) GameSettings.ToggleMute();
         if (page == Page.Auth && Net.State != AccountState.LoggedOut) { pass = ""; AfterAuth(); }
         if (page == Page.Main && Net.State == AccountState.LoggedOut && GameState.Mode == GameMode.Menu) page = Page.Auth;
 
@@ -195,7 +196,7 @@ public partial class GameUI : MonoBehaviour
         GUI.matrix = Matrix4x4.Scale(new Vector3(scale, scale, 1f));
         float W = Screen.width / scale, H = Screen.height / scale;
 
-        if (GameState.Mode == GameMode.Playing) DrawHud(W, H);
+        if (GameState.Mode == GameMode.Playing) { DrawHud(W, H); }
         if (GameSettings.ShowFps)
             Text(new Rect(W - 160, H - 30, 150, 24), Mathf.RoundToInt(fps) + " FPS", small, Color.green, TextAnchor.MiddleRight);
         if (GameState.Over && overAt >= 0f) DrawDeathFade(W, H);
@@ -253,6 +254,8 @@ public partial class GameUI : MonoBehaviour
         }
 
         if (page == Page.None && !GameState.Over && Button(new Rect(W - 104, 68, 90, 28), "MENU", btnSmall)) Pause();
+        if (page == Page.None && !GameState.Over && Button(new Rect(W - 104, 100, 90, 28), GameSettings.Muted ? "UNMUTE" : "MUTE", btnSmall)) GameSettings.ToggleMute();
+
 
         // rings (the real ring sprite)
         int ready = TenRing.ReadyCount;
@@ -349,6 +352,7 @@ public partial class GameUI : MonoBehaviour
         Text(new Rect(0, 70, W, 70), "REBOUND RUMBLE", title, Gold, TextAnchor.MiddleCenter, 54);
         Text(new Rect(0, 135, W, 30), "THE RINGS  -  ENDLESS", label, new Color(1f, 0.55f, 0.15f), TextAnchor.MiddleCenter, 14);
         Text(new Rect(0, 170, W, 26), "BEST SCORE  " + Leaderboard.Best, label, Gold, TextAnchor.MiddleCenter, 16);
+        if (Button(new Rect(W - 130, 16, 110, 34), GameSettings.Muted ? "UNMUTE (M)" : "MUTE (M)", btnSmall)) GameSettings.ToggleMute();
 
         float bx = W / 2 - 160, by = 240;
         if (Button(new Rect(bx, by, 320, 54), "PLAY")) StartTransit("ENTERING THE ARENA", GameState.StartRun);
@@ -644,6 +648,11 @@ public partial class GameUI : MonoBehaviour
         if (Button(new Rect(bx, by, 340, 52), "RESUME")) Resume();
         if (Button(new Rect(bx, by + 64, 340, 52), "SETTINGS")) { settingsReturn = Page.Pause; page = Page.Settings; serverField = Net.BaseUrl; }
         if (Button(new Rect(bx, by + 128, 340, 52), "CONTROLS")) page = Page.Controls;
+        if (Coop.InRun)
+        {
+            if (Button(new Rect(bx, by + 192, 340, 52), Coop.IsHost ? "END RUN FOR BOTH" : "LEAVE ROOM")) GameState.ReturnToMenu(true);
+            return;
+        }
         if (Button(new Rect(bx, by + 192, 340, 52), "RESTART RUN")) StartTransit("RESTARTING", () => { GameState.ReturnToMenu(true); GameState.StartRun(); });
         if (Button(new Rect(bx, by + 256, 340, 52), "MAIN MENU (SAVE SCORE)")) GameState.ReturnToMenu(true);
     }
@@ -683,8 +692,14 @@ public partial class GameUI : MonoBehaviour
         if (Net.State != AccountState.LoggedIn) Text(new Rect(0, 356, W, 22), "SAVED OFFLINE - SYNCS WHEN YOU LOG IN", small, new Color(1f, 0.7f, 0.3f, c), TextAnchor.MiddleCenter);
         if (t < 1.4f) return;
         float bx = W / 2 - 160, by = 396;
-        if (Coop.IsGuest) Text(new Rect(bx, by + 8, 320, 36), "WAITING FOR THE HOST...", label, new Color(0.5f, 0.75f, 1f), TextAnchor.MiddleCenter, 14);
-        else if (Button(new Rect(bx, by, 320, 52), "TRY AGAIN")) StartTransit("ENTERING THE ARENA", GameState.StartRun);
+        if (Coop.InRun)
+        {
+            // co-op: nobody restarts from here - both players go back to the lobby, and the host starts the next run from there
+            Text(new Rect(bx - 60, by - 6, 440, 22), "BOTH PLAYERS RETURN TO THE LOBBY", small, new Color(0.5f, 0.75f, 1f, c), TextAnchor.MiddleCenter);
+            if (Button(new Rect(bx, by + 24, 320, 56), "BACK TO LOBBY")) GameState.ReturnToMenu(false);
+            return;
+        }
+        if (Button(new Rect(bx, by, 320, 52), "TRY AGAIN")) StartTransit("ENTERING THE ARENA", GameState.StartRun);
         if (Button(new Rect(bx, by + 66, 320, 52), "MAIN MENU")) GameState.ReturnToMenu(false);
     }
 

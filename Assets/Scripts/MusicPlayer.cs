@@ -25,6 +25,16 @@ public static class MusicPlayer
         if (src.clip != null && !src.isPlaying) src.Play();
     }
 
+    /// <summary>Switch the looping track (sea battles use their own music).</summary>
+    public static void Use(string clipName)
+    {
+        Start();
+        var c = GameAssets.Clip(clipName);
+        if (c == null || src == null || src.clip == c) return;
+        src.clip = c;
+        src.Play();
+    }
+
     static bool ducked;
     public static void Duck(bool on) { ducked = on; Refresh(); }
 

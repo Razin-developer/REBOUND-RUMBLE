@@ -20,7 +20,8 @@ public class InputHub : MonoBehaviour
     {
         KeyCode.W, KeyCode.A, KeyCode.S, KeyCode.D,
         KeyCode.UpArrow, KeyCode.DownArrow, KeyCode.LeftArrow, KeyCode.RightArrow,
-        KeyCode.Space, KeyCode.Tab, KeyCode.Escape, KeyCode.R, KeyCode.Q, KeyCode.E
+        KeyCode.Space, KeyCode.Tab, KeyCode.Escape, KeyCode.R, KeyCode.Q, KeyCode.E,
+        KeyCode.I, KeyCode.LeftShift, KeyCode.RightShift, KeyCode.Alpha1, KeyCode.Alpha2, KeyCode.Alpha3, KeyCode.X, KeyCode.H, KeyCode.C
     };
 
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]

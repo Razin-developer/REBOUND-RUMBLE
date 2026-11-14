@@ -8,7 +8,7 @@ using UnityEngine;
 /// </summary>
 public class TenRing : MonoBehaviour
 {
-    public enum RingState { Orbit, Flying, Returning }
+    public enum RingState { Orbit, Flying, Returning, Lent }
 
     public const int Total = 10;
     public static readonly List<TenRing> All = new List<TenRing>();
@@ -16,6 +16,7 @@ public class TenRing : MonoBehaviour
     public static readonly Color Amber = new Color(1f, 0.5f, 0.08f);
 
     public RingState State { get; private set; }
+    public Vector2 LoanVel = Vector2.right;      // sea battle: direction the lent ring is travelling (for its spin)
     public int Index { get { return index; } }
 
     public float speed = 7.5f * GS.S;
@@ -189,6 +190,22 @@ public class TenRing : MonoBehaviour
         Vfx.Shockwave(transform.position, Gold, 0.6f, 0.22f);
     }
 
+    /// <summary>Sea battle: something else (Naval) drives this ring's position; physics and enemy hits are off.</summary>
+    public void BeginLoan(Vector2 at)
+    {
+        State = RingState.Lent;
+        rb.simulated = false; col.enabled = false;
+        transform.position = new Vector3(at.x, at.y, transform.position.z);
+        lastHit.Clear();
+        trail.Clear(); trail.emitting = true;
+        if (sparks != null) { var se = sparks.emission; se.enabled = true; }
+        vsr.color = Color.white;
+        gsr.color = new Color(1f, 0.55f, 0.1f, 0.5f);
+        SetSorting(topLayerId, 502);
+    }
+
+    public void EndLoan() { if (State == RingState.Lent) Catch(); }
+
     void StartReturn()
     {
         if (State != RingState.Flying) return;
@@ -246,7 +263,7 @@ public class TenRing : MonoBehaviour
         float flip = 0.3f + 0.7f * Mathf.Abs(Mathf.Cos(Time.time * 16f + index));
         float s = 0.55f * GS.S;
         visual.localScale = new Vector3(s * flip, s, 1f);
-        Vector2 v = rb.linearVelocity;
+        Vector2 v = State == RingState.Lent ? LoanVel : rb.linearVelocity;
         if (v.sqrMagnitude > 0.01f) visual.localRotation = Quaternion.Euler(0f, 0f, Mathf.Atan2(v.y, v.x) * Mathf.Rad2Deg);
         glow.localScale = Vector3.one * GS.S * (1.1f + Mathf.Sin(Time.time * 18f + index) * 0.15f);
     }
@@ -291,7 +308,7 @@ public class TenRing : MonoBehaviour
 
     void FixedUpdate()
     {
-        if (State == RingState.Orbit) return;
+        if (State == RingState.Orbit || State == RingState.Lent) return;
         if (owner == null) { Destroy(gameObject); return; }
 
         Vector2 p = rb.position;
