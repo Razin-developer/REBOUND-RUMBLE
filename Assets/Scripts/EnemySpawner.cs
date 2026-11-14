@@ -1,0 +1,98 @@
+using UnityEngine;
+
+/// <summary>
+/// Endless spawner. No waves: enemies keep arriving from off-screen and the pressure ramps up the longer you survive.
+/// </summary>
+public class EnemySpawner : MonoBehaviour
+{
+    Transform player;
+    float nextSpawn;
+    int offscreenFails;
+
+    [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
+    static void Install() { new GameObject("EnemySpawner").AddComponent<EnemySpawner>(); }
+
+    void Start()
+    {
+        GameObject p = GameObject.FindWithTag("Player");
+        if (p == null) { Debug.LogError("[EnemySpawner] No Player found."); return; }
+        player = p.transform;
+        Nav.Init(player.position);
+        GameState.OnRunStart += ClearAll;
+        GameState.OnReturnToMenu += ClearAll;
+    }
+
+    void OnDestroy()
+    {
+        GameState.OnRunStart -= ClearAll;
+        GameState.OnReturnToMenu -= ClearAll;
+    }
+
+    void ClearAll()
+    {
+        for (int i = Enemy.All.Count - 1; i >= 0; i--)
+            if (Enemy.All[i] != null) Destroy(Enemy.All[i].gameObject);
+        nextSpawn = Time.time + 1.5f;
+        offscreenFails = 0;
+    }
+
+    void Update()
+    {
+        if (player == null) return;
+        Nav.Refresh(player.position);
+        if (!GameState.Active) return;
+
+        GameState.RunTime += Time.deltaTime;
+        if (Time.time < nextSpawn) return;
+
+        float t = GameState.RunTime;
+        int cap = Mathf.Min(36, 8 + (int)(t / 10f));
+        float interval = Mathf.Max(0.35f, 2.0f - t * 0.012f);
+        nextSpawn = Time.time + interval * Random.Range(0.8f, 1.2f);
+        if (Enemy.All.Count >= cap) return;
+        SpawnGroup(t);
+    }
+
+    EnemyKind PickKind(float t)
+    {
+        // weighted by how long you have survived
+        float wSlime = 4f;
+        float wAnt = t > 8f ? 3f : 0f;
+        float wBat = t > 25f ? 2.5f : 0f;
+        float wBeetle = t > 40f ? 2f : 0f;
+        float wWasp = t > 55f ? 2f : 0f;
+        float wGolem = t > 80f ? 1f : 0f;
+        float total = wSlime + wAnt + wBat + wBeetle + wWasp + wGolem;
+        float r = Random.value * total;
+        if ((r -= wSlime) < 0f) return EnemyKind.Slime;
+        if ((r -= wAnt) < 0f) return EnemyKind.Ant;
+        if ((r -= wBat) < 0f) return EnemyKind.Bat;
+        if ((r -= wBeetle) < 0f) return EnemyKind.Beetle;
+        if ((r -= wWasp) < 0f) return EnemyKind.Wasp;
+        return EnemyKind.Golem;
+    }
+
+    void SpawnGroup(float t)
+    {
+        Vector2 pos, fallback;
+        bool ok = Nav.TryGetSpawnPoint(player.position, 7f, out pos, out fallback);
+        if (!ok)
+        {
+            // only spawn on screen if nothing off-screen has been available for a while
+            offscreenFails++;
+            if (offscreenFails < 4 || fallback == Vector2.zero) return;
+            pos = fallback;
+        }
+        offscreenFails = 0;
+
+        float hpScale = 1f + t / 180f;
+        float speedScale = Mathf.Min(1.5f, 1f + t / 600f);
+        EnemyKind kind = PickKind(t);
+        int n = kind == EnemyKind.Ant ? Random.Range(3, 6) : 1;
+        for (int i = 0; i < n; i++)
+        {
+            Vector2 p = pos + Random.insideUnitCircle * (n > 1 ? 0.7f : 0f);
+            Enemy.Spawn(kind, p, hpScale, speedScale);
+        }
+    }
+}

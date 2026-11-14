@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: rebound-rumble-api
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: MONGODB_URI
+        sync: false        # paste in the Render dashboard
+      - key: JWT_SECRET
+        generateValue: true
