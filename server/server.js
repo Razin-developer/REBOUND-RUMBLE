@@ -53,24 +53,32 @@ function auth(req, res, next) {
 }
 
 // ---- MongoDB connection, cached so it survives across serverless invocations (Vercel) ----
-const cache = global._rrMongo || (global._rrMongo = { promise: null, ready: false });
+const cache = global._rrMongo || (global._rrMongo = { promise: null, ready: false, lastError: '' });
+// Atlas "copy connection string" often carries extra options (authMechanism=SCRAM-SHA-1, replicaSet, loadBalanced...)
+// that can make a serverless connection fail. Keep only the essentials.
+function cleanUri(u) { return String(u || '').trim().replace(/^["']|["']$/g, '').split('?')[0] + '?retryWrites=true&w=majority'; }
+const safe = (m) => String(m || '').replace(/mongodb(\+srv)?:\/\/\S+/g, '<uri>').slice(0, 220);
 async function connectDB() {
   if (cache.ready && mongoose.connection.readyState === 1) return;
   if (!MONGODB_URI) throw new Error('MONGODB_URI is not set');
   if (!cache.promise) {
-    cache.promise = mongoose.connect(MONGODB_URI, { serverSelectionTimeoutMS: 8000, maxPoolSize: 5 })
+    cache.promise = mongoose.connect(cleanUri(MONGODB_URI), { serverSelectionTimeoutMS: 8000, maxPoolSize: 5, bufferCommands: false })
       .then(() => Promise.all([User.init(), Score.init()]))   // make sure the unique indexes exist
       .then(() => { cache.ready = true; });
   }
-  try { await cache.promise; } catch (e) { cache.promise = null; throw e; }
+  try { await cache.promise; cache.lastError = ''; } catch (e) { cache.promise = null; cache.lastError = safe(e.message); throw e; }
 }
+// health first (before the DB gate): reports WHY the database is unreachable instead of just failing
+app.get('/api/health', async (req, res) => {
+  try { await connectDB(); res.json({ ok: true, db: true }); }
+  catch (e) { res.status(503).json({ ok: false, db: false, hasUri: !!MONGODB_URI, reason: safe(e.message) }); }
+});
 app.use(async (req, res, next) => {
   try { await connectDB(); next(); }
-  catch (e) { console.error('db', e.message); res.status(503).json({ error: 'Database unavailable' }); }
+  catch (e) { console.error('db', e.message); res.status(503).json({ error: 'Database unavailable: ' + safe(e.message) }); }
 });
 
 app.get('/', (req, res) => res.json({ ok: true, name: 'rebound-rumble-api' }));
-app.get('/api/health', (req, res) => res.json({ ok: true, db: mongoose.connection.readyState === 1 }));
 
 app.post('/api/register', authLimiter, async (req, res) => {
   try {

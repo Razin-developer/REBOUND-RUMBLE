@@ -10,6 +10,7 @@ public class Enemy : MonoBehaviour
 
     public EnemyKind kind;
     public float Radius { get; private set; }
+    public bool passive;          // tutorial dummy: stands still and never hurts
 
     float speed, hp, maxHp, bodyScale, seed, nextPath, flashUntil, stuckTime, sideUntil;
     int damage, score;
@@ -69,7 +70,8 @@ public class Enemy : MonoBehaviour
                 burstColor = new Color(0.4f, 0.9f, 0.35f); frameTime = 0.3f; break;
         }
         hp = maxHp = Mathf.Max(1, Mathf.CeilToInt(baseHp * hpScale));
-        speed *= speedScale;
+        speed *= speedScale * GS.S;
+        bodyScale *= GS.S; Radius *= GS.S;
         transform.localScale = Vector3.one * bodyScale;
         frameTime *= 0.5f;
         frames = GameAssets.Frames(sheet, 4);
@@ -126,6 +128,8 @@ public class Enemy : MonoBehaviour
     {
         if (playerT == null || !GameState.Active) { rb.linearVelocity = Vector2.zero; return; }
 
+        if (passive) { knock = Vector2.Lerp(knock, Vector2.zero, 8f * Time.fixedDeltaTime); rb.linearVelocity = knock; return; }
+
         Vector2 pos = rb.position;
         Vector2 target = playerT.position;
 
@@ -148,7 +152,7 @@ public class Enemy : MonoBehaviour
             }
             else if (dashState == 2)
             {
-                rb.linearVelocity = dashDir * 8f;
+                rb.linearVelocity = dashDir * 8f * GS.S;
                 if (Time.time >= dashUntil) { dashState = 0; nextDash = Time.time + Random.Range(2f, 3.5f); }
                 return;
             }
@@ -157,7 +161,10 @@ public class Enemy : MonoBehaviour
         if (Time.time >= nextPath)
         {
             nextPath = Time.time + 0.15f;
-            desired = Nav.Direction(pos, target, Radius * 0.8f);
+            int pl = playerT.gameObject.layer, el = gameObject.layer;
+            Vector2 sd;
+            if (pl != el && pl >= 20 && el >= 20 && Nav.StairDirection(pos, el, pl > el, Radius * 0.8f, out sd)) desired = sd;   // other level: walk to the stairs first
+            else desired = Nav.Direction(pos, target, Radius * 0.8f);
         }
 
         // stuck on a corner / prop? sidestep for a moment
@@ -196,6 +203,7 @@ public class Enemy : MonoBehaviour
 
     void OnCollisionStay2D(Collision2D c)
     {
+        if (passive) return;
         var ph = c.collider.GetComponentInParent<PlayerHealth>();
         if (ph != null) ph.Damage(damage, ((Vector2)ph.transform.position - rb.position));
     }
@@ -236,7 +244,7 @@ public class Enemy : MonoBehaviour
             barRoot = new GameObject("HP").transform;
             barRoot.SetParent(transform, false);
             barRoot.localPosition = new Vector3(0f, 0.62f, 0f);
-            barRoot.localScale = Vector3.one / bodyScale;
+            barRoot.localScale = Vector3.one * GS.S / bodyScale;
             MakeBarPart("bg", Color.black, 0.9f, 0.14f, 510);
             barFill = MakeBarPart("fill", new Color(0.3f, 1f, 0.35f), barWidth, 0.08f, 511);
             barRenderers = barRoot.GetComponentsInChildren<SpriteRenderer>();

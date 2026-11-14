@@ -26,7 +26,7 @@ public class GameUI : MonoBehaviour
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
     static void Install()
     {
-        if (FindFirstObjectByType<GameUI>() == null) new GameObject("GameUI").AddComponent<GameUI>();
+        if (FindAnyObjectByType<GameUI>() == null) new GameObject("GameUI").AddComponent<GameUI>();
     }
 
     void Awake()
@@ -216,7 +216,7 @@ public class GameUI : MonoBehaviour
 
         // rings (the real ring sprite)
         int ready = TenRing.ReadyCount;
-        Text(new Rect(18, H - 96, 420, 20), "TEN RINGS " + ready + "/" + TenRing.Total, small, Gold);
+        Text(new Rect(18, H - 96, 420, 20), "RINGS " + ready + "/" + TenRing.Total, small, Gold);
         Texture2D ringTex = GameAssets.Texture("ring");
         for (int i = 0; i < TenRing.Total; i++)
         {
@@ -233,6 +233,16 @@ public class GameUI : MonoBehaviour
         Rect(new Rect(18, H - 24, 200, 8), new Color(0, 0, 0, 0.7f));
         Rect(new Rect(19, H - 23, 198 * vk, 6), vready ? Gold : new Color(0.8f, 0.45f, 0.1f));
 
+        // guard meter
+        {
+            float gx = W - 300, gy = H - 130;
+            string gl = Guard.Active ? "GUARDING" : (Guard.Ready ? (Guard.Left < Guard.MaxTime - 0.05f ? "GUARD RECHARGING" : "GUARD READY  [HOLD E]") : "GUARD COOLDOWN  " + Mathf.CeilToInt(Guard.CooldownLeft) + "s");
+            Text(new Rect(gx, gy, 284, 18), gl, small, Guard.Ready ? new Color(0.6f, 0.9f, 1f) : new Color(1, 1, 1, 0.6f), TextAnchor.MiddleRight);
+            Rect(new Rect(gx + 40, gy + 20, 244, 8), new Color(0, 0, 0, 0.7f));
+            float gk = Guard.Ready ? Guard.Left / Guard.MaxTime : 1f - Guard.CooldownLeft / Mathf.Max(0.01f, Guard.CooldownTotal);
+            Rect(new Rect(gx + 41, gy + 21, 242 * Mathf.Clamp01(gk), 6), Guard.Ready ? new Color(0.45f, 0.85f, 1f) : new Color(0.8f, 0.45f, 0.1f));
+        }
+
         // rune pillar teleport
         if (RunePillars.Total > 0)
         {
@@ -245,7 +255,7 @@ public class GameUI : MonoBehaviour
                 Rect(new Rect(br.x + 40, br.y + 24, 244, 10), new Color(0, 0, 0, 0.7f));
                 Rect(new Rect(br.x + 41, br.y + 25, 242 * (1f - RunePillars.CooldownLeft / RunePillars.Cooldown), 8), new Color(0.4f, 0.8f, 1f));
             }
-            else if (Button(br, "RUNE TELEPORT READY [E]", btnSmall)) RunePillars.Teleport();
+            else if (Button(br, "RUNE TELEPORT READY [T]", btnSmall)) RunePillars.Teleport();
         }
 
         // exit direction
@@ -297,7 +307,7 @@ public class GameUI : MonoBehaviour
     {
         Dim(W, H, 0.35f);
         Text(new Rect(0, 70, W, 70), "REBOUND RUMBLE", title, Gold, TextAnchor.MiddleCenter, 54);
-        Text(new Rect(0, 135, W, 30), "THE TEN RINGS  -  ENDLESS", label, new Color(1f, 0.55f, 0.15f), TextAnchor.MiddleCenter, 14);
+        Text(new Rect(0, 135, W, 30), "THE RINGS  -  ENDLESS", label, new Color(1f, 0.55f, 0.15f), TextAnchor.MiddleCenter, 14);
 
         float bx = W / 2 - 160, by = 240;
         if (Button(new Rect(bx, by, 320, 54), "PLAY")) StartTransit("ENTERING THE ARENA", GameState.StartRun);
@@ -317,6 +327,7 @@ public class GameUI : MonoBehaviour
         Text(new Rect(20, H - 56, 500, 22), who, small, Net.State == AccountState.LoggedIn ? GameSettings.Avatar : new Color(1f, 0.7f, 0.3f));
         if (Net.PendingCount > 0) Text(new Rect(20, H - 34, 500, 22), Net.PendingCount + " SCORE(S) WAITING TO SYNC", small, new Color(1, 1, 1, 0.5f));
         if (Button(new Rect(W - 380, H - 60, 170, 38), "STORY", btnSmall)) StartStory(false);
+        if (Button(new Rect(W - 570, H - 60, 170, 38), Tutorial.Done ? "TUTORIAL" : "TUTORIAL  *", btnSmall)) StartTransit("PRACTICE ARENA", Tutorial.Begin);
         if (Button(new Rect(W - 190, H - 60, 170, 38), Net.State == AccountState.LoggedIn ? "LOG OUT" : "SIGN IN", btnSmall))
         { Net.Logout(); page = Page.Auth; pass = ""; }
     }
@@ -335,7 +346,13 @@ public class GameUI : MonoBehaviour
         Text(new Rect(r.x + 330, r.y + 84, 120, 20), "SCORE", small, Color.gray, TextAnchor.MiddleRight);
         Text(new Rect(r.x + 470, r.y + 84, 130, 20), "TIME", small, Color.gray, TextAnchor.MiddleRight);
         int rows = 0;
-        if (online)
+        if (Net.State != AccountState.LoggedIn)
+        {
+            Text(new Rect(r.x, r.y + 200, r.width, 30), "YOU ARE NOT LOGGED IN", label, new Color(1f, 0.7f, 0.3f), TextAnchor.MiddleCenter, 18);
+            Text(new Rect(r.x + 40, r.y + 240, r.width - 80, 40), "SIGN IN TO SEE THE GLOBAL LEADERBOARD AND SAVE YOUR SCORES.", small, new Color(1, 1, 1, 0.7f), TextAnchor.MiddleCenter);
+            if (Button(new Rect(r.x + r.width / 2 - 100, r.y + 300, 200, 46), "SIGN IN")) { Net.Logout(); page = Page.Auth; pass = ""; }
+        }
+        else if (online)
         {
             for (int i = 0; i < Net.Board.Count && i < 10; i++)
             {
@@ -349,7 +366,7 @@ public class GameUI : MonoBehaviour
             var top = Leaderboard.Top(10);
             for (int i = 0; i < top.Count; i++) { DrawRow(r, i, (i + 1).ToString(), top[i].name, top[i].score, top[i].seconds, top[i].mine); rows++; }
         }
-        if (Button(new Rect(r.x + 120, r.y + r.height - 66, 200, 46), "REFRESH")) Net.FetchBoard();
+        if (Net.State == AccountState.LoggedIn && Button(new Rect(r.x + 120, r.y + r.height - 66, 200, 46), "REFRESH")) Net.FetchBoard();
         if (Button(new Rect(r.x + r.width - 320, r.y + r.height - 66, 200, 46), "BACK")) page = Page.Main;
     }
 
@@ -495,7 +512,8 @@ public class GameUI : MonoBehaviour
             { "W A S D / ARROWS", "MOVE" },
             { "LEFT CLICK / SPACE", "THROW ONE RING (HOLD TO REPEAT)" },
             { "RIGHT CLICK / Q", "5-RING VOLLEY (LONG COOLDOWN)" },
-            { "E", "TELEPORT TO A RUNE PILLAR (15s)" },
+            { "HOLD E", "GUARD - BLOCKS HITS (5s METER, REFILLS WHEN RELEASED)" },
+            { "T", "TELEPORT TO A RUNE PILLAR (15s)" },
             { "TAB", "PAUSE / CONTROLS" },
             { "ESC", "PAUSE MENU" },
             { "PORTAL / CHESTS", "WALK NEAR - NO CLICK NEEDED" },
@@ -583,7 +601,7 @@ public class GameUI : MonoBehaviour
         else page = Page.Main;
     }
 
-    void StartStory(bool thenPlay) { storyStartsGame = thenPlay; storyIdx = 0; storyT = 0f; page = Page.Story; }
+    void StartStory(bool thenPlay) { storyStartsGame = thenPlay; storyIdx = 0; storyT = 0f; page = Page.Story; Cinematic.Begin(FinishStory); }
 
     void AdvanceStory()
     {
@@ -604,7 +622,7 @@ public class GameUI : MonoBehaviour
         float pt = Time.unscaledTime - pageStart;
         if (page == Page.Splash)
         {
-            if (pt > 3.2f || (pt > 0.4f && (InputHub.MouseDown || InputHub.Pressed(KeyCode.Space) || InputHub.Pressed(KeyCode.Return)))) page = Page.Loading;
+            if (pt > 5.0f || (pt > 0.4f && (InputHub.MouseDown || InputHub.Pressed(KeyCode.Space) || InputHub.Pressed(KeyCode.Return)))) page = Page.Loading;
         }
         else if (page == Page.Loading)
         {
@@ -618,9 +636,7 @@ public class GameUI : MonoBehaviour
         }
         else if (page == Page.Story)
         {
-            storyT += Time.unscaledDeltaTime;
-            if (InputHub.Pressed(KeyCode.Space) || InputHub.Pressed(KeyCode.Return)) AdvanceStory();
-            if (InputHub.Pressed(KeyCode.Escape)) FinishStory();
+            // the Cinematic component runs the story and calls FinishStory when it ends or is skipped
         }
 
         if (tPhase != 0)
@@ -658,15 +674,15 @@ public class GameUI : MonoBehaviour
     {
         float t = Time.unscaledTime - pageStart;
         Rect(new Rect(0, 0, W, H), Color.black);
-        float a1 = Mathf.Clamp01(t / 0.5f) * (1f - Mathf.Clamp01((t - 1.3f) / 0.4f));
-        Text(new Rect(0, H / 2 - 50, W, 60), "DEVB", title, new Color(1f, 1f, 1f, a1), TextAnchor.MiddleCenter, 56);
-        Text(new Rect(0, H / 2 + 14, W, 30), "PRESENTS", small, new Color(1f, 0.82f, 0.25f, a1 * Mathf.Clamp01((t - 0.5f) / 0.4f)), TextAnchor.MiddleCenter, 12);
-        float a2 = Mathf.Clamp01((t - 1.8f) / 0.6f);
+        float a1 = Mathf.Clamp01(t / 0.5f) * (1f - Mathf.Clamp01((t - 2.3f) / 0.5f));
+        Text(new Rect(0, H / 2 - 50, W, 60), "RAZIN", title, new Color(1f, 1f, 1f, a1), TextAnchor.MiddleCenter, 56);
+        Text(new Rect(0, H / 2 + 14, W, 30), "PRESENTS", small, new Color(1f, 0.82f, 0.25f, a1 * Mathf.Clamp01((t - 0.7f) / 0.5f)), TextAnchor.MiddleCenter, 12);
+        float a2 = Mathf.Clamp01((t - 2.9f) / 0.7f);
         if (a2 > 0f)
         {
             DrawRingSprite(new Rect(W / 2 - 60, H / 2 - 210, 120, 120), t * 90f, new Color(1f, 1f, 1f, a2));
             Text(new Rect(0, H / 2 - 60, W, 80), "REBOUND RUMBLE", title, new Color(Gold.r, Gold.g, Gold.b, a2), TextAnchor.MiddleCenter, 54);
-            Text(new Rect(0, H / 2 + 20, W, 30), "THE TEN RINGS", label, new Color(1f, 0.55f, 0.15f, a2), TextAnchor.MiddleCenter, 14);
+            Text(new Rect(0, H / 2 + 20, W, 30), "THE RINGS", label, new Color(1f, 0.55f, 0.15f, a2), TextAnchor.MiddleCenter, 14);
         }
         Text(new Rect(0, H - 40, W, 22), "CLICK TO SKIP", small, new Color(1, 1, 1, 0.3f), TextAnchor.MiddleCenter);
     }
@@ -684,64 +700,7 @@ public class GameUI : MonoBehaviour
         Text(new Rect(60, H - 90, W - 120, 24), Flow.Tips[Mathf.FloorToInt(t / 2.6f) % Flow.Tips.Length], small, new Color(1f, 1f, 1f, 0.6f), TextAnchor.MiddleCenter);
     }
 
-    void DrawStory(float W, float H)
-    {
-        Rect(new Rect(0, 0, W, H), new Color(0.03f, 0.02f, 0.06f, 1f));
-        for (int i = 0; i < 40; i++)
-        {
-            float x = ((i * 173) % 1000) / 1000f * W;
-            float y = H - ((Time.unscaledTime * (18 + (i % 7) * 7) + i * 97f) % (H + 40f));
-            Rect(new Rect(x, y, 3, 3), new Color(1f, 0.55f, 0.15f, 0.2f + 0.2f * Mathf.Sin(Time.unscaledTime * 2f + i)));
-        }
-        if (GUI.Button(new Rect(0, 0, W, H), "", GUIStyle.none)) AdvanceStory();
-
-        float t = Time.unscaledTime;
-        int wf = Mathf.FloorToInt(t * 8f) % 4;
-        string suf = GameSettings.Costume == 0 ? "" : GameSettings.Costume.ToString();
-        Vector2 c = new Vector2(W / 2, 250);
-        switch (storyIdx)
-        {
-            case 0:
-                for (int k = 0; k < 10; k++)
-                {
-                    float a = t * 0.9f + k * 0.628f;
-                    DrawRingSprite(new Rect(c.x + Mathf.Cos(a) * 190 - 22, c.y + Mathf.Sin(a) * 70 - 22, 44, 44), t * 120f + k * 36f, new Color(1f, 0.85f, 0.5f, 0.55f + 0.45f * Mathf.Sin(a)));
-                }
-                break;
-            case 1:
-                DrawFrame("enemy_slime", 4, wf, new Rect(c.x - 230, c.y - 70, 130, 143), false);
-                DrawFrame("enemy_beetle", 4, wf, new Rect(c.x - 65, c.y - 70, 130, 143), false);
-                DrawFrame("enemy_golem", 4, wf, new Rect(c.x + 100, c.y - 90, 150, 165), false);
-                break;
-            case 2:
-                DrawFrame("player_s" + suf, 6, wf, new Rect(c.x - 85, c.y - 100, 170, 187), false);
-                DrawRingSprite(new Rect(c.x - 20, c.y + 90, 40, 40), t * 90f, new Color(1f, 0.85f, 0.4f, 0.8f));
-                break;
-            case 3:
-                DrawFrame("enemy_bat", 4, wf, new Rect(c.x - 130, c.y - 120 + Mathf.Sin(t * 2f) * 10f, 260, 217), false);
-                DrawFrame("enemy_wasp", 4, wf, new Rect(c.x - 250, c.y + 20, 110, 121), false);
-                DrawFrame("enemy_ant", 4, wf, new Rect(c.x + 140, c.y + 20, 110, 121), false);
-                break;
-            default:
-                DrawFrame("player_s" + suf, 6, 5, new Rect(c.x - 85, c.y - 100, 170, 187), false);
-                for (int k = 0; k < 10; k++)
-                {
-                    float a = t * 1.6f + k * 0.628f;
-                    DrawRingSprite(new Rect(c.x + Mathf.Cos(a) * 130 - 18, c.y + 10 + Mathf.Sin(a) * 40 - 18, 36, 36), t * 200f + k * 36f, new Color(1f, 0.85f, 0.4f, 0.6f + 0.4f * Mathf.Sin(a)));
-                }
-                break;
-        }
-
-        if (wrap == null) { wrap = new GUIStyle(label) { wordWrap = true, alignment = TextAnchor.UpperCenter, fontSize = 14 }; }
-        Text(new Rect(0, 400, W, 36), Flow.StoryTitles[storyIdx], title, Gold, TextAnchor.MiddleCenter, 24);
-        string full = Flow.StoryText[storyIdx];
-        string shown = full.Substring(0, Mathf.Min(full.Length, Mathf.FloorToInt(storyT * 38f)));
-        Text(new Rect(W / 2 - 400, 448, 800, 120), shown, wrap, Color.white, TextAnchor.UpperCenter, 14);
-        for (int i = 0; i < Flow.StoryText.Length; i++)
-            Rect(new Rect(W / 2 - 50 + i * 22, 600, 14, 6), i <= storyIdx ? Gold : new Color(0.3f, 0.25f, 0.3f));
-        Text(new Rect(0, 622, W, 22), "CLICK OR SPACE TO CONTINUE", small, new Color(1, 1, 1, 0.4f + 0.3f * Mathf.Sin(t * 4f)), TextAnchor.MiddleCenter);
-        if (Button(new Rect(W - 150, H - 56, 130, 36), "SKIP", btnSmall)) FinishStory();
-    }
+    void DrawStory(float W, float H) { }   // the cinematic draws itself (Cinematic.cs)
 
     void DrawTransit(float W, float H)
     {

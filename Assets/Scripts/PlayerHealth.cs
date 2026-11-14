@@ -48,8 +48,16 @@ public class PlayerHealth : MonoBehaviour
     public void Damage(int amount, Vector2 away)
     {
         if (!GameState.Active || Time.time < invulnUntil) return;
+        if (Guard.Active)
+        {
+            Guard.Blocked(transform.position + Vector3.up * 0.4f);
+            var pg = GetComponent<PlayerMovement>();
+            if (pg != null) pg.Push(away.normalized * 3f);
+            invulnUntil = Time.time + 0.25f;
+            return;
+        }
         invulnUntil = Time.time + 1.0f;
-        GameState.PlayerHp = Mathf.Max(0, GameState.PlayerHp - amount);
+        GameState.PlayerHp = Mathf.Max(Tutorial.Active ? 1 : 0, GameState.PlayerHp - amount);   // practice level: cannot die
 
         var pm = GetComponent<PlayerMovement>();
         if (pm != null) pm.Push(away.normalized * 9f);

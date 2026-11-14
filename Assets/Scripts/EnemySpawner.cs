@@ -5,6 +5,7 @@ using UnityEngine;
 /// </summary>
 public class EnemySpawner : MonoBehaviour
 {
+    public const int MaxEnemies = 16;   // hard limit of enemies alive at once
     Transform player;
     float nextSpawn;
     int offscreenFails;
@@ -40,14 +41,14 @@ public class EnemySpawner : MonoBehaviour
     {
         if (player == null) return;
         Nav.Refresh(player.position);
-        if (!GameState.Active) return;
+        if (!GameState.Active || Tutorial.Active) return;   // the practice level places its own enemies
 
         GameState.RunTime += Time.deltaTime;
         if (Time.time < nextSpawn) return;
 
         float t = GameState.RunTime;
-        int cap = Mathf.Min(36, 8 + (int)(t / 10f));
-        float interval = Mathf.Max(0.35f, 2.0f - t * 0.012f);
+        int cap = Mathf.Min(MaxEnemies, 5 + (int)(t / 15f));
+        float interval = Mathf.Max(0.7f, 2.2f - t * 0.01f);
         nextSpawn = Time.time + interval * Random.Range(0.8f, 1.2f);
         if (Enemy.All.Count >= cap) return;
         SpawnGroup(t);
@@ -89,6 +90,8 @@ public class EnemySpawner : MonoBehaviour
         float speedScale = Mathf.Min(1.5f, 1f + t / 600f);
         EnemyKind kind = PickKind(t);
         int n = kind == EnemyKind.Ant ? Random.Range(3, 6) : 1;
+        n = Mathf.Min(n, MaxEnemies - Enemy.All.Count);
+        if (n <= 0) return;
         for (int i = 0; i < n; i++)
         {
             Vector2 p = pos + Random.insideUnitCircle * (n > 1 ? 0.7f : 0f);

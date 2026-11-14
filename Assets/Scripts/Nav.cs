@@ -24,6 +24,10 @@ public static class Nav
         new Vector2Int(1,1), new Vector2Int(1,-1), new Vector2Int(-1,1), new Vector2Int(-1,-1)
     };
     static Vector2Int lastPlayerCell = new Vector2Int(int.MinValue, 0);
+    struct Stair { public Vector2 pos; public int upper, lower; public Dictionary<Vector2Int, int> field; }
+    static readonly List<Stair> stairs = new List<Stair>();
+    /// <summary>Where the player stood when the map was scanned: fixed reference for the portal.</summary>
+    public static Vector2 InitialStart;
 
     public static bool Ready { get { return ground != null && walkable.Count > 0; } }
 
@@ -31,13 +35,13 @@ public static class Nav
     static void ResetStatics()
     {
         ground = stone = wall = null; allMaps = null;
-        walkable.Clear(); dist.Clear(); spawnCells.Clear();
+        walkable.Clear(); dist.Clear(); spawnCells.Clear(); stairs.Clear();
         lastPlayerCell = new Vector2Int(int.MinValue, 0);
     }
 
     static Tilemap Find(string n)
     {
-        foreach (var t in Object.FindObjectsByType<Tilemap>(FindObjectsSortMode.None))
+        foreach (var t in Object.FindObjectsByType<Tilemap>())
             if (t.name == n) return t;
         return null;
     }
@@ -95,11 +99,12 @@ public static class Nav
     /// <summary>Call once after the scene loads (player position = flood-fill start). Covers ALL levels, minus walls and solid props.</summary>
     public static void Init(Vector2 playerPos)
     {
-        walkable.Clear(); dist.Clear(); spawnCells.Clear(); groundMaps.Clear(); wallMaps.Clear();
+        walkable.Clear(); dist.Clear(); spawnCells.Clear(); groundMaps.Clear(); wallMaps.Clear(); stairs.Clear();
+        InitialStart = playerPos;
         ground = Find("Layer 1 - Grass");
         stone = Find("Layer 1 - Stone Ground");
         wall = Find("Layer 1 - Wall");
-        allMaps = Object.FindObjectsByType<Tilemap>(FindObjectsSortMode.None);
+        allMaps = Object.FindObjectsByType<Tilemap>();
         if (ground == null) { Debug.LogWarning("[Nav] 'Layer 1 - Grass' tilemap not found; enemies will chase in straight lines."); return; }
         foreach (var t in allMaps)
         {
@@ -129,6 +134,20 @@ public static class Nav
             var v = new Vector3Int(c.x, c.y, 0);
             if (ground.HasTile(v) || (stone != null && stone.HasTile(v))) spawnCells.Add(CenterOf(c));   // spawns/chests stay on the main level
         }
+        spawnCells.Sort((a, b) => a.x != b.x ? a.x.CompareTo(b.x) : a.y.CompareTo(b.y));   // same order every run
+        BuildAvoid();
+
+        // stairs: a flood-fill field per staircase so enemies on another level can walk to it
+        foreach (var st in Object.FindObjectsByType<Cainos.PixelArtTopDown_Basic.StairsLayerTrigger>())
+        {
+            var c2 = st.GetComponent<Collider2D>();
+            Vector2 sp = c2 != null ? (Vector2)c2.bounds.center : (Vector2)st.transform.position;
+            var field = new Dictionary<Vector2Int, int>();
+            Vector2Int seed = CellOf(sp), s2;
+            if (walkable.Contains(seed)) s2 = seed; else if (!NearestIn(seed, 4, false, out s2)) continue;
+            Flood(s2, field);
+            stairs.Add(new Stair { pos = sp, upper = LayerMask.NameToLayer(st.layerUpper), lower = LayerMask.NameToLayer(st.layerLower), field = field });
+        }
     }
 
     static bool NearestIn(Vector2Int c, int r, bool useDist, out Vector2Int found)
@@ -155,18 +174,23 @@ public static class Nav
         dist.Clear();
         Vector2Int seed = pc;
         if (!walkable.Contains(seed) && !NearestIn(pc, 4, false, out seed)) return;
+        Flood(seed, dist);
+    }
+
+    static void Flood(Vector2Int seed, Dictionary<Vector2Int, int> d)
+    {
         var q = new Queue<Vector2Int>();
-        dist[seed] = 0; q.Enqueue(seed);
+        d[seed] = 0; q.Enqueue(seed);
         while (q.Count > 0)
         {
             var c = q.Dequeue();
-            int dc = dist[c];
-            foreach (var d in Dir8)
+            int dc = d[c];
+            foreach (var dir in Dir8)
             {
-                var n = c + d;
-                if (dist.ContainsKey(n) || !walkable.Contains(n)) continue;
-                if (d.x != 0 && d.y != 0 && (!walkable.Contains(c + new Vector2Int(d.x, 0)) || !walkable.Contains(c + new Vector2Int(0, d.y)))) continue;
-                dist[n] = dc + 1; q.Enqueue(n);
+                var n = c + dir;
+                if (d.ContainsKey(n) || !walkable.Contains(n)) continue;
+                if (dir.x != 0 && dir.y != 0 && (!walkable.Contains(c + new Vector2Int(dir.x, 0)) || !walkable.Contains(c + new Vector2Int(0, dir.y)))) continue;
+                d[n] = dc + 1; q.Enqueue(n);
             }
         }
     }
@@ -196,7 +220,28 @@ public static class Nav
     /// Direction an enemy at `pos` should walk to reach `target`: straight if the way is clear, otherwise along the
     /// real path (flood-fill gradient), aiming at the furthest path point it can already see (string pulling).
     /// </summary>
-    public static Vector2 Direction(Vector2 pos, Vector2 target, float radius)
+    public static Vector2 Direction(Vector2 pos, Vector2 target, float radius) { return DirField(dist, pos, target, radius); }
+
+    /// <summary>Direction toward the nearest staircase that leads from `layer` up (or down). False if there is none.</summary>
+    public static bool StairDirection(Vector2 pos, int layer, bool up, float radius, out Vector2 dir)
+    {
+        dir = Vector2.zero;
+        if (!Ready || stairs.Count == 0) return false;
+        Vector2Int c = CellOf(pos);
+        int bi = -1; float best = float.MaxValue;
+        for (int i = 0; i < stairs.Count; i++)
+        {
+            if ((up ? stairs[i].lower : stairs[i].upper) != layer) continue;
+            int d;
+            float score = stairs[i].field.TryGetValue(c, out d) ? d : 1000f + (stairs[i].pos - pos).sqrMagnitude;
+            if (score < best) { best = score; bi = i; }
+        }
+        if (bi < 0) return false;
+        dir = DirField(stairs[bi].field, pos, stairs[bi].pos, radius);
+        return true;
+    }
+
+    static Vector2 DirField(Dictionary<Vector2Int, int> dist, Vector2 pos, Vector2 target, float radius)
     {
         Vector2 direct = (target - pos);
         if (direct.sqrMagnitude < 0.0001f) return Vector2.zero;
@@ -260,7 +305,10 @@ public static class Nav
     }
 
     /// <summary>The free walkable cell farthest from `from` (used for the exit portal).</summary>
-    public static bool TryFarthestFreeCell(Vector2 from, out Vector2 point)
+    public static bool TryFarthestFreeCell(Vector2 from, out Vector2 point) { return TryFarthestFreeCell(from, Vector2.zero, 0f, out point); }
+
+    /// <summary>Farthest free cell from `from`, skipping everything within `avoidR` of `avoid`.</summary>
+    public static bool TryFarthestFreeCell(Vector2 from, Vector2 avoid, float avoidR, out Vector2 point)
     {
         point = Vector2.zero;
         if (!Ready) return false;
@@ -271,10 +319,92 @@ public static class Nav
         {
             float d = Vector2.Distance(p, from);
             if (d <= best) continue;
+            if (avoidR > 0f && Vector2.Distance(p, avoid) < avoidR) continue;
+            if (InAvoid(p)) continue;
             if (Physics2D.OverlapCircle(p, 1.0f, f, buf) > 0) continue;
             best = d; point = p; found = true;
         }
         return found;
+    }
+
+    /// <summary>Areas under/around trees and bushes (canopies have no collider): portal and chests keep out of them.</summary>
+    static readonly List<Rect> avoid = new List<Rect>();
+
+    static bool Hidden(string n)
+    {
+        return n.IndexOf("Tree", System.StringComparison.OrdinalIgnoreCase) >= 0 || n.IndexOf("Bush", System.StringComparison.OrdinalIgnoreCase) >= 0 || n.IndexOf("Plant", System.StringComparison.OrdinalIgnoreCase) >= 0;
+    }
+
+    static void BuildAvoid()
+    {
+        avoid.Clear();
+        foreach (var sr in Object.FindObjectsByType<SpriteRenderer>())
+        {
+            bool hit = false;
+            for (var t = sr.transform; t != null && !hit; t = t.parent) hit = Hidden(t.name);
+            if (!hit) continue;
+            Bounds b = sr.bounds;
+            avoid.Add(new Rect(b.min.x - 1.6f, b.min.y - 1.6f, b.size.x + 3.2f, b.size.y + 3.2f));
+        }
+    }
+
+    static bool InAvoid(Vector2 p) { foreach (var r in avoid) if (r.Contains(p)) return true; return false; }
+
+    /// <summary>
+    /// Nearest open spot to `target`: walkable, outside tree canopies, no solid prop/wall within `clear`, not within `sep` of anything in `taken`,
+    /// and (preferably) reachable in a straight line from `from`. Actors (player, enemies, rings) do not count as obstacles.
+    /// </summary>
+    public static bool TryOpenCellNear(Vector2 target, float maxD, float clear, Vector2 from, List<Vector2> taken, float sep, out Vector2 point)
+    {
+        point = Vector2.zero;
+        if (!Ready) return false;
+        var f = new ContactFilter2D(); f.useTriggers = false; f.useLayerMask = false;
+        var buf = new Collider2D[10];
+        float best = float.MaxValue; bool found = false;
+        foreach (var p in spawnCells)
+        {
+            float d = Vector2.Distance(p, target);
+            if (d > maxD || d >= best) continue;
+            if (InAvoid(p)) continue;
+            bool close = false;
+            if (taken != null) foreach (var t in taken) if (Vector2.Distance(t, p) < sep) { close = true; break; }
+            if (close) continue;
+            int n = Physics2D.OverlapCircle(p, clear, f, buf);
+            bool solid = false;
+            for (int i = 0; i < n && !solid; i++)
+            {
+                var c = buf[i];
+                if (c == null) continue;
+                if (c.GetComponentInParent<Enemy>() != null || c.GetComponentInParent<PlayerMovement>() != null || c.GetComponentInParent<TenRing>() != null) continue;
+                solid = true;
+            }
+            if (solid) continue;
+            float score = d + (LineClear(from, p, 0.25f) ? 0f : 3f);
+            if (score < best) { best = score; point = p; found = true; }
+        }
+        return found;
+    }
+
+    /// <summary>Roomiest free spot (largest obstacle-free circle) at least `minFrac` of the way to the farthest point; deterministic.</summary>
+    public static bool TryRoomyCell(Vector2 from, float minFrac, out Vector2 point)
+    {
+        point = Vector2.zero;
+        if (!Ready || spawnCells.Count == 0) return false;
+        var f = new ContactFilter2D(); f.useTriggers = false; f.useLayerMask = false;
+        var buf = new Collider2D[2];
+        float maxD = 0f;
+        foreach (var p in spawnCells) maxD = Mathf.Max(maxD, Vector2.Distance(p, from));
+        float minD = maxD * minFrac, bestClear = -1f, bestD = -1f; bool found = false;
+        foreach (var p in spawnCells)
+        {
+            float d = Vector2.Distance(p, from);
+            if (d < minD) continue;
+            if (InAvoid(p)) continue;
+            float clear = 0f;
+            for (float rr = 1f; rr <= 7f; rr += 0.75f) { if (Physics2D.OverlapCircle(p, rr, f, buf) > 0) break; clear = rr; }
+            if (clear > bestClear + 0.01f || (Mathf.Abs(clear - bestClear) <= 0.01f && d > bestD)) { bestClear = clear; bestD = d; point = p; found = true; }
+        }
+        return found && bestClear >= 1f;
     }
 
     static Rect CameraRect(float margin)

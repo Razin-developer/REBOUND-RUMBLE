@@ -1,8 +1,8 @@
 using UnityEngine;
 
 /// <summary>
-/// Drives the player's Shang-Chi sprite: 3 costumes, 4-direction walk cycle, throw wind-up/release poses,
-/// footstep dust, a golden Ten Rings aura, the entrance beam and the death animation.
+/// Drives the player's hero sprite: 3 costumes, 4-direction walk cycle, throw wind-up/release poses,
+/// footstep dust, a golden rings aura, the entrance beam and the death animation.
 /// </summary>
 public class PlayerVisual : MonoBehaviour
 {
@@ -90,6 +90,7 @@ public class PlayerVisual : MonoBehaviour
         ClearCorpse();
         corpse = new GameObject("Player Corpse");
         corpse.transform.position = p;
+        corpse.transform.localScale = transform.localScale;
         var csr = corpse.AddComponent<SpriteRenderer>();
         csr.sprite = sr.sprite; csr.flipX = sr.flipX;
         csr.sortingLayerID = sr.sortingLayerID; csr.sortingOrder = sr.sortingOrder;
@@ -103,7 +104,7 @@ public class PlayerVisual : MonoBehaviour
         wasOver = GameState.Over;
         if (builtCostume != GameSettings.Costume) BuildSets();
         if (GameState.Over) { sr.enabled = false; return; }
-        if (sets[0][0] == null) return;
+        if (sets[0] == null || sets[0][0] == null) return;
 
         Vector2 v = rb != null ? rb.linearVelocity : Vector2.zero;
         bool moving = GameState.Active && v.sqrMagnitude > 0.4f;
@@ -138,7 +139,7 @@ public class PlayerVisual : MonoBehaviour
     }
 }
 
-/// <summary>The fallen Shang-Chi: hops back, topples sideways, dust puffs.</summary>
+/// <summary>The fallen hero: hops back, topples sideways, dust puffs.</summary>
 public class CorpseFx : MonoBehaviour
 {
     public float fallDir = -1f;

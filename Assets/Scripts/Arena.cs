@@ -1,4 +1,4 @@
-using UnityEngine;
+    using UnityEngine;
 
 /// <summary>
 /// Closed rectangular arena. Builds four solid, perfectly bouncy walls plus a visible border,

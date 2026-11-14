@@ -6,7 +6,7 @@ public static class MusicPlayer
     static AudioSource src;
 
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
-    static void ResetStatics() { src = null; }
+    static void ResetStatics() { src = null; ducked = false; }
 
     public static void Start()
     {
@@ -25,8 +25,11 @@ public static class MusicPlayer
         if (src.clip != null && !src.isPlaying) src.Play();
     }
 
+    static bool ducked;
+    public static void Duck(bool on) { ducked = on; Refresh(); }
+
     public static void Refresh()
     {
-        if (src != null) src.volume = Mathf.Clamp01(GameSettings.MusicVol) * 0.6f;
+        if (src != null) src.volume = ducked ? 0f : Mathf.Clamp01(GameSettings.MusicVol) * 0.6f;
     }
 }

@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using UnityEngine;
 
 /// <summary>
-/// Auto-attached to the Player. Owns the Ten Rings.
+/// Auto-attached to the Player. Owns the rings.
 /// Click / hold (or Space): throw ONE ring at a time with a short delay - all 10 can be out at once.
 /// Right click / Q: VOLLEY - throw 5 rings together in a fan. Strong, so it has a long cooldown.
 /// </summary>
@@ -13,6 +13,7 @@ public class RingLauncher : MonoBehaviour
     public const int VolleySize = 5;
     public const float VolleyCooldown = 4f;
     static float volleyReadyAt;
+    public static int Throws, Volleys;   // counters (used by the tutorial)
 
     public static float VolleyLeft { get { return Mathf.Max(0f, volleyReadyAt - Time.time); } }
     public static bool VolleyReady { get { return VolleyLeft <= 0f && TenRing.ReadyCount >= VolleySize; } }
@@ -71,6 +72,7 @@ public class RingLauncher : MonoBehaviour
         yield return new WaitForSeconds(0.12f);   // matches the wind-up pose
         if (ring == null || !GameState.Active || ring.State != TenRing.RingState.Orbit) yield break;
         ring.Launch(dir);
+        Throws++;
         Sfx.Play("ring_throw", 0.7f, 0.9f + Random.value * 0.3f);
     }
 
@@ -82,6 +84,7 @@ public class RingLauncher : MonoBehaviour
         if (rings.Count < VolleySize) return;
 
         volleyReadyAt = Time.time + VolleyCooldown;
+        Volleys++;
         nextThrow = Time.time + 0.7f;
         Vector2 baseDir = ChooseDirection(0f);
         PlayerVisual.Throw(baseDir);

@@ -7,6 +7,20 @@ public enum ChestKind { Heal, Treasure }
 /// <summary>Places the entrance chest, the exit portal and the treasure chest beside it.</summary>
 public class World : MonoBehaviour
 {
+    static Transform FindAltar(Vector2 from)
+    {
+        Transform best = null; float bd = -1f;
+        foreach (var t in Object.FindObjectsByType<Transform>())
+        {
+            if (t.name.IndexOf("Altar 01", System.StringComparison.OrdinalIgnoreCase) < 0) continue;
+            if (t.parent != null && t.parent.name.IndexOf("Altar 01", System.StringComparison.OrdinalIgnoreCase) >= 0) continue;
+            if (t.GetComponentInChildren<SpriteRenderer>() == null) continue;
+            float d = Vector2.Distance(t.position, from);
+            if (d > bd) { bd = d; best = t; }
+        }
+        return best;
+    }
+
     public static float PortalProgress;
     public static bool NearPortal;
 
@@ -26,9 +40,14 @@ public class World : MonoBehaviour
 
         Vector2 pos;
         // exit portal: as far from the entrance as possible ("outside")
-        bool havePortal = Nav.TryFarthestFreeCell(start, out pos);
+        // exit portal: the roomiest open area in the outer half of the map (fixed spot, same every run)
+        bool havePortal = Nav.TryRoomyCell(Nav.InitialStart, 0.45f, out pos);
+        if (!havePortal) havePortal = Nav.TryFarthestFreeCell(Nav.InitialStart, out pos);
         Vector2 portalPos = pos;
-        if (havePortal) Portal.Create(portalPos);
+        // the exit is the map's own "PF Props - Altar 01" (the farthest one from the entrance); a scripted portal is only the fallback
+        Transform altar = FindAltar(Nav.InitialStart);
+        if (altar != null) { portalPos = Portal.Attach(altar).Anchor; havePortal = true; }
+        else if (havePortal) Portal.Create(portalPos);
 
         // chests scattered at random spots across the map (never at the spawn point)
         var placed = new List<Vector2> { start };
@@ -46,13 +65,35 @@ public class World : MonoBehaviour
         }
 
         // treasure chest: right beside the portal
-        if (havePortal && Nav.TryFreeCellNear(portalPos, 1.8f, 3.4f, out pos)) Chest.Create(pos, ChestKind.Treasure);
+        if (havePortal)
+        {
+            var st = Random.state; Random.InitState(7);   // same treasure spot beside the portal every run
+            if (Nav.TryFreeCellNear(portalPos, 1.8f, 3.4f, out pos)) Chest.Create(pos, ChestKind.Treasure);
+            Random.state = st;
+        }
     }
 }
 
 /// <summary>Walk into it (no button needed) and stay a moment to leave the run and bank your score.</summary>
 public class Portal : MonoBehaviour
 {
+    public Vector2 Anchor { get; private set; }     // where the exit is (centre of the altar's base / the scripted portal)
+    bool existing;                                  // true when this is the map's own altar
+    float reach = 1.3f * GS.S;
+
+    public static Portal Attach(Transform t)
+    {
+        var p = t.gameObject.AddComponent<Portal>();
+        p.existing = true;
+        var srs = t.GetComponentsInChildren<SpriteRenderer>();
+        Bounds b = srs.Length > 0 ? srs[0].bounds : new Bounds(t.position, Vector3.one);
+        foreach (var r in srs) b.Encapsulate(r.bounds);
+        p.Anchor = new Vector2(b.center.x, b.min.y + 0.55f);
+        p.reach = 2.0f;                              // the altar is solid: be generous
+        Current = p;
+        return p;
+    }
+
     SpriteRenderer sr;
     Sprite[] frames;
     Transform player;
@@ -69,43 +110,55 @@ public class Portal : MonoBehaviour
         var go = new GameObject("Exit Portal");
         go.transform.position = pos;
         var portal = go.AddComponent<Portal>();
+        portal.Anchor = pos;
         Current = portal;
         return portal;
     }
 
     void Start()
     {
+        GameObject p = GameObject.FindWithTag("Player");
+        if (p != null) player = p.transform;
+        var g = new GameObject("Glow");
+        var gsr = g.AddComponent<SpriteRenderer>();
+        gsr.sprite = GameAssets.Glow;
+        gsr.color = new Color(1f, 0.55f, 0.1f, 0.35f);
+        if (existing)
+        {
+            var asr = GetComponentInChildren<SpriteRenderer>();
+            g.transform.position = new Vector3(Anchor.x, Anchor.y + 0.6f, 0f);
+            g.transform.localScale = Vector3.one * 4.2f;
+            g.transform.SetParent(transform, true);
+            gsr.sortingLayerName = asr != null ? asr.sortingLayerName : GameState.ActorLayer;
+            gsr.sortingOrder = asr != null ? asr.sortingOrder - 1 : 0;
+            return;
+        }
+        transform.localScale = Vector3.one * GS.S;
         frames = GameAssets.Frames("portal", 4);
         sr = gameObject.AddComponent<SpriteRenderer>();
         sr.sprite = frames[0];
         sr.sortingLayerName = GameState.ActorLayer;
         sr.sortingOrder = 1;
-        var g = new GameObject("Glow");
         g.transform.SetParent(transform, false);
         g.transform.localScale = Vector3.one * 4.2f;
-        var gsr = g.AddComponent<SpriteRenderer>();
-        gsr.sprite = GameAssets.Glow;
-        gsr.color = new Color(1f, 0.55f, 0.1f, 0.35f);
         gsr.sortingLayerName = GameState.ActorLayer;
         gsr.sortingOrder = 0;
-        GameObject p = GameObject.FindWithTag("Player");
-        if (p != null) player = p.transform;
     }
 
     void Update()
     {
         animT += Time.deltaTime;
-        if (animT >= 0.12f) { animT = 0f; frame = (frame + 1) % frames.Length; sr.sprite = frames[frame]; }
+        if (!existing && animT >= 0.12f) { animT = 0f; frame = (frame + 1) % frames.Length; sr.sprite = frames[frame]; }
         if (Time.time >= nextSpark && Time.timeScale > 0f)
         {
             nextSpark = Time.time + 0.5f;
-            Vfx.Burst((Vector2)transform.position + new Vector2(Random.Range(-0.5f, 0.5f), Random.Range(-0.6f, 0.8f)), new Color(1f, 0.8f, 0.3f), 3, 1.2f, 0.1f, 0.6f);
+            Vfx.Burst(Anchor + new Vector2(Random.Range(-0.5f, 0.5f), Random.Range(-0.2f, 1.2f)), new Color(1f, 0.8f, 0.3f), 3, 1.2f, 0.1f, 0.6f);
         }
 
         if (!GameState.Active || player == null) { progress = 0f; World.PortalProgress = 0f; World.NearPortal = false; return; }
 
         Vector2 pp = (Vector2)player.position + new Vector2(0f, 0.4f);
-        bool near = Vector2.Distance(pp, (Vector2)transform.position + new Vector2(0f, 0.2f)) < 1.3f;
+        bool near = Vector2.Distance(pp, Anchor + new Vector2(0f, 0.2f)) < reach;
         World.NearPortal = near;
         progress = near ? progress + Time.deltaTime / 1.2f : Mathf.Max(0f, progress - Time.deltaTime * 2f);
         World.PortalProgress = progress;
@@ -116,8 +169,9 @@ public class Portal : MonoBehaviour
     {
         progress = 0f; World.PortalProgress = 0f; World.NearPortal = false;
         Sfx.Play("portal", 0.9f, 1f);
-        Vfx.Shockwave(transform.position, new Color(1f, 0.7f, 0.2f), 2.5f, 0.6f);
-        Vfx.Burst(transform.position, new Color(1f, 0.8f, 0.3f), 40, 6f, 0.2f, 0.8f);
+        Vfx.Shockwave(Anchor, new Color(1f, 0.7f, 0.2f), 2.5f, 0.6f);
+        Vfx.Burst(Anchor, new Color(1f, 0.8f, 0.3f), 40, 6f, 0.2f, 0.8f);
+        if (Tutorial.Active) { Tutorial.PortalUsed(); return; }   // practice level: just finish the lesson
         GameState.ReturnToMenu(true);
     }
 }
@@ -127,6 +181,7 @@ public class Chest : MonoBehaviour
 {
     public static readonly List<Chest> All = new List<Chest>();
 
+    public static int Opens;        // counter (used by the tutorial)
     ChestKind kind;
     Sprite[] frames;
     SpriteRenderer sr, glow;
@@ -148,6 +203,7 @@ public class Chest : MonoBehaviour
 
     void Start()
     {
+        transform.localScale = Vector3.one * GS.S;
         frames = GameAssets.Frames("chest", 2);
         sr = gameObject.AddComponent<SpriteRenderer>();
         sr.sprite = frames[0];
@@ -187,11 +243,12 @@ public class Chest : MonoBehaviour
         }
 
         Vector2 pp = (Vector2)player.position + new Vector2(0f, 0.4f);
-        if (Vector2.Distance(pp, transform.position) < 1.0f) Open();
+        if (Vector2.Distance(pp, transform.position) < 1.0f * GS.S) Open();
     }
 
     void Open()
     {
+        Opens++;
         ready = false;
         sr.sprite = frames[1];
         glow.enabled = false;

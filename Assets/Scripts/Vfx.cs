@@ -20,6 +20,7 @@ public static class Vfx
     public static void Burst(Vector2 pos, Color color, int count = 12, float speed = 4f, float size = 0.14f, float life = 0.4f)
     {
         count = Mathf.Max(1, Mathf.RoundToInt(count * GameSettings.ParticleScale));
+        speed *= GS.S; size *= GS.S;
         var go = new GameObject("VFX Burst");
         go.transform.position = pos;
         var ps = go.AddComponent<ParticleSystem>();
@@ -95,7 +96,7 @@ public static class Vfx
         sr.color = color;
         sr.sortingLayerName = GameState.TopLayer;
         sr.sortingOrder = 590;
-        go.AddComponent<RingPulse>().Init(sr, radius, duration);
+        go.AddComponent<RingPulse>().Init(sr, radius * GS.S, duration);
     }
 }
 

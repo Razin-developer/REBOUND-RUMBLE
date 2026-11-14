@@ -2,7 +2,7 @@ using System.Collections.Generic;
 using UnityEngine;
 
 /// <summary>
-/// One of the Ten Rings. While ready it orbits the player's waist (front half in front of the player, back half behind).
+/// One of the rings. While ready it orbits the player's waist (front half in front of the player, back half behind).
 /// Thrown, it ricochets off walls and props, slices through enemies, curves toward the nearest fresh enemy,
 /// then boomerangs back to be caught. Crosses stairs like the player does.
 /// </summary>
@@ -17,7 +17,7 @@ public class TenRing : MonoBehaviour
 
     public RingState State { get; private set; }
 
-    public float speed = 7.5f;
+    public float speed = 7.5f * GS.S;
     public float damage = 2f;
     public int maxHits = 5;          // enemy hits before it heads home
     public int maxBounces = 9;       // wall bounces before it heads home
@@ -92,7 +92,7 @@ public class TenRing : MonoBehaviour
 
         trail = gameObject.AddComponent<TrailRenderer>();
         trail.time = 0.3f;
-        trail.widthMultiplier = 0.28f;
+        trail.widthMultiplier = 0.28f * GS.S;
         trail.widthCurve = AnimationCurve.Linear(0f, 1f, 1f, 0f);
         trail.material = Vfx.ParticleMaterial;
         trail.sortingLayerName = GameState.TopLayer;
@@ -111,7 +111,7 @@ public class TenRing : MonoBehaviour
         rb.collisionDetectionMode = CollisionDetectionMode2D.Continuous;
 
         col = gameObject.AddComponent<CircleCollider2D>();
-        col.radius = 0.2f;
+        col.radius = 0.2f * GS.S;
         col.sharedMaterial = mat;
 
         // never collide with the owner, other rings, or existing enemies
@@ -205,7 +205,7 @@ public class TenRing : MonoBehaviour
         Vfx.Burst(at, Gold, 6, 2.2f, 0.1f, 0.25f);
     }
 
-    Vector2 Anchor() { return (Vector2)owner.position + new Vector2(0f, 0.45f); }
+    Vector2 Anchor() { return (Vector2)owner.position + new Vector2(0f, 0.45f) * GS.S; }
 
     // ---------------------------------------------------------------- per frame
     void LateUpdate()
@@ -220,9 +220,9 @@ public class TenRing : MonoBehaviour
             float a = Time.time * 1.8f + index * (Mathf.PI * 2f / Total);
             float sn = Mathf.Sin(a), cs = Mathf.Cos(a);
             bool back = sn > 0f;
-            transform.position = Anchor() + new Vector2(cs * 0.62f, sn * 0.22f);
+            transform.position = Anchor() + new Vector2(cs * 0.62f, sn * 0.22f) * GS.S;
             float depth = 0.5f - 0.5f * sn;                       // 0 = far back .. 1 = near front
-            float s = Mathf.Lerp(0.2f, 0.32f, depth);
+            float s = Mathf.Lerp(0.2f, 0.32f, depth) * GS.S;
             float flip = 0.25f + 0.75f * Mathf.Abs(Mathf.Cos(Time.time * 3f + index));  // spins around its own axis
             visual.localScale = new Vector3(s * flip, s, 1f);
             visual.localRotation = Quaternion.Euler(0f, 0f, Mathf.Sin(a) * 18f);
@@ -243,11 +243,11 @@ public class TenRing : MonoBehaviour
         if (State == RingState.Orbit) return;
         // thrown rings tumble like a spinning disc
         float flip = 0.3f + 0.7f * Mathf.Abs(Mathf.Cos(Time.time * 16f + index));
-        float s = 0.55f;
+        float s = 0.55f * GS.S;
         visual.localScale = new Vector3(s * flip, s, 1f);
         Vector2 v = rb.linearVelocity;
         if (v.sqrMagnitude > 0.01f) visual.localRotation = Quaternion.Euler(0f, 0f, Mathf.Atan2(v.y, v.x) * Mathf.Rad2Deg);
-        glow.localScale = Vector3.one * (1.1f + Mathf.Sin(Time.time * 18f + index) * 0.15f);
+        glow.localScale = Vector3.one * GS.S * (1.1f + Mathf.Sin(Time.time * 18f + index) * 0.15f);
     }
 
     static Vector2 Rot(Vector2 v, float deg)
@@ -300,7 +300,7 @@ public class TenRing : MonoBehaviour
         {
             Enemy e = Enemy.All[i];
             if (e == null) continue;
-            float reach = e.Radius + 0.22f;
+            float reach = e.Radius + 0.22f * GS.S;
             if (((Vector2)e.transform.position - p).sqrMagnitude > reach * reach) continue;
             float last;
             if (lastHit.TryGetValue(e, out last) && Time.time - last < 0.4f) continue;

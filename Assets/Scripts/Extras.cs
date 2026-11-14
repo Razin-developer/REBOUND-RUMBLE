@@ -3,12 +3,13 @@ using UnityEngine;
 
 /// <summary>
 /// Rune Pillars (the "PF Props - Rune Pillar" props already in the map): walk near one to ATTUNE it,
-/// then press E (or click the HUD button) to teleport to it from anywhere. 15 second cooldown.
+/// then press T (or click the HUD button) to teleport to it from anywhere. 15 second cooldown.
 /// </summary>
 public class RunePillars : MonoBehaviour
 {
     public const float Cooldown = 15f;
-    public static int Total, Attuned;
+    public static int Total, Attuned, Teleports;
+    public static bool TryPillarPos(out Vector2 pos) { pos = Vector2.zero; if (inst == null || inst.pillars.Count == 0) return false; pos = inst.pillars[0].basePos + Vector2.up * 0.6f; return true; }
     static float readyAt;
     static RunePillars inst;
 
@@ -34,7 +35,7 @@ public class RunePillars : MonoBehaviour
         inst = this;
         var p = GameObject.FindWithTag("Player");
         if (p != null) player = p.transform;
-        foreach (var t in FindObjectsByType<Transform>(FindObjectsSortMode.None))
+        foreach (var t in FindObjectsByType<Transform>())
         {
             string n = t.name;
             if (n.IndexOf("Rune Pillar", System.StringComparison.OrdinalIgnoreCase) < 0 || n.IndexOf("Broken", System.StringComparison.OrdinalIgnoreCase) >= 0) continue;
@@ -60,6 +61,20 @@ public class RunePillars : MonoBehaviour
                 pl.runes[i] = r;
             }
             pillars.Add(pl);
+        }
+        // only ONE rune pillar: keep the one nearest the player's start, remove the rest
+        if (pillars.Count > 1)
+        {
+            Vector2 sp = player != null ? (Vector2)player.position : Vector2.zero;
+            Pillar keep = pillars[0];
+            foreach (var q in pillars) if (Vector2.Distance(q.basePos, sp) < Vector2.Distance(keep.basePos, sp)) keep = q;
+            foreach (var q in pillars)
+            {
+                if (q == keep) continue;
+                if (q.glow != null) Destroy(q.glow.gameObject);
+                if (q.t != null) q.t.gameObject.SetActive(false);
+            }
+            pillars.Clear(); pillars.Add(keep);
         }
         Total = pillars.Count;
         GameState.OnRunStart += ResetRun;
@@ -93,7 +108,7 @@ public class RunePillars : MonoBehaviour
             if (p.attuned) continue;
             if (Vector2.Distance(pp, p.basePos + Vector2.up * 0.6f) < 2.3f) Attune(p);
         }
-        if (InputHub.Pressed(KeyCode.E)) Teleport();
+        if (InputHub.Pressed(KeyCode.T)) Teleport();
     }
 
     void Attune(Pillar p)
@@ -104,7 +119,7 @@ public class RunePillars : MonoBehaviour
         Vfx.Burst(c, new Color(1f, 0.85f, 0.4f), 26, 4f, 0.14f, 0.7f);
         Sfx.Play("chest_open", 0.8f, 1.4f);
         FloatingText.Add(p.top + Vector2.up * 0.6f, "RUNE PILLAR ATTUNED", new Color(0.6f, 0.95f, 1f), 16, 2.2f);
-        if (Attuned == 1) FloatingText.Add(p.top + Vector2.up * 1.2f, "PRESS E TO TELEPORT HERE", new Color(1f, 0.85f, 0.35f), 12, 2.6f);
+        if (Attuned == 1) FloatingText.Add(p.top + Vector2.up * 1.2f, "PRESS T TO TELEPORT HERE", new Color(1f, 0.85f, 0.35f), 12, 2.6f);
     }
 
     public static bool Teleport() { return inst != null && inst.DoTeleport(); }
@@ -134,6 +149,7 @@ public class RunePillars : MonoBehaviour
 
         var rb = player.GetComponent<Rigidbody2D>();
         player.position = dest;
+        Teleports++;
         if (rb != null) { rb.position = dest; rb.linearVelocity = Vector2.zero; }
         string layerName = best.sortLayer;
         int phys = LayerMask.NameToLayer(layerName);
@@ -201,7 +217,7 @@ public class PortalArrow : MonoBehaviour
         Portal portal = Portal.Current;
         if (sr == null || player == null || portal == null || GameState.Mode != GameMode.Playing || GameState.Over) { if (sr != null) sr.enabled = false; Distance = -1f; return; }
         Vector2 from = (Vector2)player.position + new Vector2(0f, 0.55f);
-        Vector2 to = (Vector2)portal.transform.position;
+        Vector2 to = portal.Anchor;
         Vector2 d = to - from;
         Distance = d.magnitude;
         sr.enabled = true;

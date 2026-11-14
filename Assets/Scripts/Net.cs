@@ -41,21 +41,22 @@ public class Net : MonoBehaviour
     public static string DisplayName { get { return State == AccountState.LoggedIn ? User : (State == AccountState.Offline ? "OFFLINE" : "-"); } }
 
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
-    static void ResetStatics() { I = null; Load(); }
+    static void ResetStatics() { I = null; loaded = false; }
 
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
     static void Install()
     {
+        if (!loaded) Load();
         if (I != null) return;
         var go = new GameObject("Net");
         DontDestroyOnLoad(go);
         I = go.AddComponent<Net>();
     }
 
-    static Net() { Load(); }
-
+    static bool loaded;
     static void Load()
     {
+        loaded = true;
         baseUrl = PlayerPrefs.GetString("rr_server", DefaultUrl).TrimEnd('/');
         Token = PlayerPrefs.GetString("rr_token", "");
         User = PlayerPrefs.GetString("rr_user", "");

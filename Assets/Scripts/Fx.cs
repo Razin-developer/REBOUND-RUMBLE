@@ -33,6 +33,7 @@ public static class Fx
     /// <summary>A bright crescent swoosh pointing along dir (throws, impacts).</summary>
     public static void Slash(Vector2 pos, Vector2 dir, Color color, float size = 0.8f, float life = 0.2f)
     {
+        size *= GS.S;
         if (dir.sqrMagnitude < 0.0001f) dir = Vector2.right;
         var go = new GameObject("Slash");
         go.transform.position = pos;
@@ -54,8 +55,8 @@ public static class Fx
             var sr = go.AddComponent<SpriteRenderer>();
             sr.sprite = GameAssets.Glow; sr.color = color;
             sr.sortingLayerName = GameState.TopLayer; sr.sortingOrder = 600;
-            float s = Random.Range(0.25f, 0.55f);
-            go.AddComponent<FxAnim>().Init(Random.Range(0.8f, 1.4f), s, s * 0.3f, color, new Vector2(Random.Range(-0.3f, 0.3f), Random.Range(0.8f, 1.8f)), Random.Range(0f, 6f));
+            float s = Random.Range(0.25f, 0.55f) * GS.S;
+            go.AddComponent<FxAnim>().Init(Random.Range(0.8f, 1.4f), s, s * 0.3f, color, new Vector2(Random.Range(-0.3f, 0.3f), Random.Range(0.8f, 1.8f)) * GS.S, Random.Range(0f, 6f));
         }
     }
 
@@ -75,8 +76,8 @@ public static class Fx
         for (int i = 0; i < n; i++)
         {
             var go = new GameObject("Blood");
-            float s = Random.Range(0.06f, 0.2f) * (radius > 0.5f ? 1.4f : 1f);
-            go.transform.position = pos + Random.insideUnitCircle * radius - new Vector2(s * 0.5f, 0f);
+            float s = Random.Range(0.06f, 0.2f) * (radius > 0.5f ? 1.4f : 1f) * GS.S;
+            go.transform.position = pos + Random.insideUnitCircle * radius * GS.S - new Vector2(s * 0.5f, 0f);
             go.transform.localScale = new Vector3(s, s * Random.Range(0.6f, 1f), 1f);
             var sr = go.AddComponent<SpriteRenderer>();
             sr.sprite = GameAssets.WhiteLeftPivot;
@@ -92,13 +93,13 @@ public static class Fx
     public static void Beam(Vector2 pos, Color color)
     {
         var go = new GameObject("Beam");
-        go.transform.position = pos + new Vector2(0f, 3.2f);
+        go.transform.position = pos + new Vector2(0f, 3.2f * GS.S);
         var sr = go.AddComponent<SpriteRenderer>();
         sr.sprite = GameAssets.Glow; sr.color = color;
         sr.sortingLayerName = GameState.TopLayer; sr.sortingOrder = 590;
         var a = go.AddComponent<FxAnim>();
         a.stretch = new Vector2(0.6f, 3.2f);
-        a.Init(0.7f, 1.6f, 0.2f, color, Vector2.zero, 0f);
+        a.Init(0.7f, 1.6f * GS.S, 0.2f * GS.S, color, Vector2.zero, 0f);
     }
 
     public static void Dust(Vector2 pos, int count = 3)
@@ -118,7 +119,7 @@ public static class Fx
         main.simulationSpace = ParticleSystemSimulationSpace.World;
         main.startLifetime = new ParticleSystem.MinMaxCurve(0.25f, 0.5f);
         main.startSpeed = new ParticleSystem.MinMaxCurve(0.3f, 1.4f);
-        main.startSize = new ParticleSystem.MinMaxCurve(0.05f, 0.12f);
+        main.startSize = new ParticleSystem.MinMaxCurve(0.05f * GS.S, 0.12f * GS.S);
         main.startColor = new ParticleSystem.MinMaxGradient(new Color(1f, 0.85f, 0.35f), new Color(1f, 0.4f, 0.08f));
         main.maxParticles = 80;
         var em = ps.emission; em.rateOverTime = 50f; em.enabled = false;

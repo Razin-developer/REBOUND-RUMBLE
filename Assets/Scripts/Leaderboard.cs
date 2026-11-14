@@ -1,7 +1,7 @@
 using System.Collections.Generic;
 using UnityEngine;
 
-/// <summary>Temporary leaderboard: a few fake rivals plus this session's runs (resets when the game closes).</summary>
+/// <summary>Temporary leaderboard: this session's runs only (no demo data) (resets when the game closes).</summary>
 public static class Leaderboard
 {
     public struct Entry
@@ -15,19 +15,7 @@ public static class Leaderboard
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
     static void ResetStatics() { entries.Clear(); seeded = false; }
 
-    static void Seed()
-    {
-        if (seeded) return;
-        seeded = true;
-        Add("SHANG", 4200, 412f, false);
-        Add("XIALING", 3650, 366f, false);
-        Add("KATY", 2980, 301f, false);
-        Add("WENWU", 2410, 255f, false);
-        Add("TRAINEE", 1720, 190f, false);
-        Add("MORRIS", 1260, 148f, false);
-        Add("RING_FAN", 840, 102f, false);
-        Add("NEWBIE", 310, 51f, false);
-    }
+    static void Seed() { }
 
     static void Add(string name, int score, float seconds, bool mine)
     {

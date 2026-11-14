@@ -36,6 +36,8 @@ public class CameraRig : MonoBehaviour
     void Awake()
     {
         instance = this;
+        var cam = GetComponent<Camera>();
+        if (cam != null && cam.orthographic) cam.orthographicSize *= GS.S;
         follow = GetComponent<Cainos.PixelArtTopDown_Basic.CameraFollow>();
         GameObject p = GameObject.FindWithTag("Player");
         if (p != null) player = p.transform;

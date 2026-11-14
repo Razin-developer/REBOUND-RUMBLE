@@ -57,7 +57,7 @@ public static class GameState
 
     public static void ReturnToMenu(bool submitScore)
     {
-        if (submitScore && Mode == GameMode.Playing && !Over) { Leaderboard.Submit(Score, RunTime); Net.QueueScore(Score, Mathf.FloorToInt(RunTime), Kills); }
+        if (submitScore && !Tutorial.Active && Mode == GameMode.Playing && !Over) { Leaderboard.Submit(Score, RunTime); Net.QueueScore(Score, Mathf.FloorToInt(RunTime), Kills); }
         Mode = GameMode.Menu; Paused = false; Over = false;
         Time.timeScale = 0f;
         AudioListener.pause = false;
@@ -76,8 +76,7 @@ public static class GameState
     {
         if (Over) return;
         Over = true;
-        Leaderboard.Submit(Score, RunTime);
-        Net.QueueScore(Score, Mathf.FloorToInt(RunTime), Kills);
+        if (!Tutorial.Active) { Leaderboard.Submit(Score, RunTime); Net.QueueScore(Score, Mathf.FloorToInt(RunTime), Kills); }
         Sfx.Play("gameover", 0.9f, 1f);
     }
 }

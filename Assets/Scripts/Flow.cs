@@ -15,7 +15,7 @@ public static class Flow
     public static readonly string[] Tips =
     {
         "A ring that finds no enemy comes home after a moment.",
-        "Walk near a Rune Pillar to attune it, then press E to teleport.",
+        "Walk near a Rune Pillar to attune it, then press T to teleport. Hold E to guard against hits (5s max).",
         "Right click or Q throws 5 rings at once - then wait for the cooldown.",
         "Chests open when you walk close to them. No click needed.",
         "Follow the golden arrow to reach the exit portal.",
@@ -24,14 +24,14 @@ public static class Flow
 
     public static readonly string[] StoryTitles =
     {
-        "THE TEN RINGS", "THE ARMY", "THE SON", "THE HUNT", "THE RINGS ANSWER"
+        "THE RINGS", "THE ARMY", "THE SON", "THE HUNT", "THE RINGS ANSWER"
     };
 
     public static readonly string[] StoryText =
     {
         "Ten ancient rings of power. Whoever wears them cannot be stopped, and cannot be forgiven.",
         "An army has carried them across a thousand years, swallowing kingdoms and hunting everyone who stood in its way.",
-        "You are Shang-Chi. You ran from your father's empire to live a quiet life. The quiet is over.",
+        "You are Rin. Your father ran from his own empire to live a quiet life. The quiet is over.",
         "His soldiers have found you. Behind them, ancient Soul Eaters circle, hungry for every spirit they can drag out of this world.",
         "Ten rings. One will. Throw them and they find their own prey. Hold the line, then follow the golden arrow to the portal and get out alive.",
     };
