@@ -71,7 +71,7 @@ public class Abilities : MonoBehaviour
         if (mv.sqrMagnitude > 0.01f) facing = mv.normalized;
 
         // ---- dash
-        if (!Dashing && DashReady && (InputHub.Pressed(KeyCode.LeftShift) || InputHub.Pressed(KeyCode.RightShift)))
+        if (!Dashing && DashReady && (InputHub.Pressed(KeyCode.LeftShift) || InputHub.Pressed(KeyCode.RightShift) || TouchControls.DashPressed))
         {
             Dashing = true; dashLeft = DashTime;
             DashDir = mv.sqrMagnitude > 0.01f ? mv.normalized : facing;
@@ -95,7 +95,7 @@ public class Abilities : MonoBehaviour
         }
 
         // ---- flight
-        if (FlyReady && (InputHub.Pressed(KeyCode.LeftControl) || InputHub.Pressed(KeyCode.RightControl))) StartFlight();
+        if (FlyReady && (InputHub.Pressed(KeyCode.LeftControl) || InputHub.Pressed(KeyCode.RightControl) || TouchControls.FlyPressed)) StartFlight();
         if (Flying)
         {
             FlyLeft -= dt;

@@ -9,17 +9,17 @@ public class TouchControls : MonoBehaviour
 {
     public static bool Active;
     public static Vector2 Move;
-    public static bool ThrowHeld, VolleyHeld, GuardHeld, TeleportPressed;
+    public static bool ThrowHeld, VolleyHeld, GuardHeld, TeleportPressed, DashPressed, FlyPressed;
 
     static bool touchSeen;
     int stickId = -1;
     Vector2 stickBase, stickKnob;     // GUI space (origin top-left, pixels)
-    bool tpWas;
+    bool tpWas, dashWas, flyWas;
     Texture2D disc, ringTex;
     GUIStyle label;
 
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
-    static void ResetStatics() { Active = false; Move = Vector2.zero; ThrowHeld = VolleyHeld = GuardHeld = TeleportPressed = false; touchSeen = false; }
+    static void ResetStatics() { Active = false; Move = Vector2.zero; ThrowHeld = VolleyHeld = GuardHeld = TeleportPressed = DashPressed = FlyPressed = false; touchSeen = false; }
 
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
     static void Install()
@@ -37,6 +37,8 @@ public class TouchControls : MonoBehaviour
     Btn BVolley { get { return new Btn { c = new Vector2(Screen.width - U * 2.5f, Screen.height * 0.74f), r = U * 0.52f }; } }
     Btn BTele { get { return new Btn { c = new Vector2(Screen.width - U * 2.75f, Screen.height * 0.74f - U * 1.2f), r = U * 0.42f }; } }
     static bool Hit(Btn b, Vector2 p) { return (p - b.c).sqrMagnitude <= (b.r * 1.15f) * (b.r * 1.15f); }
+    Btn BDash { get { return new Btn { c = new Vector2(Screen.width - U * 4.05f, Screen.height * 0.74f), r = U * 0.46f }; } }
+    Btn BFly { get { return new Btn { c = new Vector2(Screen.width - U * 4.15f, Screen.height * 0.74f - U * 1.25f), r = U * 0.46f }; } }
     bool TeleOn { get { return RunePillars.Total > 0 && RunePillars.Attuned > 0; } }
 
     void Update()
@@ -48,11 +50,11 @@ public class TouchControls : MonoBehaviour
         if (Input.touchCount > 0 && !Application.isMobilePlatform) touchSeen = true;
         Active = Application.isMobilePlatform || touchSeen;
 
-        Move = Vector2.zero; ThrowHeld = VolleyHeld = GuardHeld = false; TeleportPressed = false;
+        Move = Vector2.zero; ThrowHeld = VolleyHeld = GuardHeld = false; TeleportPressed = false; DashPressed = FlyPressed = false;
         bool playing = Active && GameState.Active && !Cinematic.Active;
-        if (!playing) { stickId = -1; tpWas = false; return; }
+        if (!playing) { stickId = -1; tpWas = dashWas = flyWas = false; return; }
 
-        bool tp = false;
+        bool tp = false, dash = false, fly = false;
         bool stickAlive = false;
         float H = Screen.height, W = Screen.width;
         for (int i = 0; i < Input.touchCount; i++)
@@ -71,6 +73,8 @@ public class TouchControls : MonoBehaviour
             if (Hit(BVolley, p)) { VolleyHeld = true; continue; }
             if (Hit(BGuard, p)) { GuardHeld = true; continue; }
             if (TeleOn && Hit(BTele, p)) { tp = true; continue; }
+            if (Hit(BDash, p)) { dash = true; continue; }
+            if (Hit(BFly, p)) { fly = true; continue; }
 
             // a new finger in the lower-left zone becomes the joystick
             if (stickId < 0 && t.phase == TouchPhase.Began && p.x < W * 0.5f && p.y > H * 0.30f)
@@ -89,6 +93,8 @@ public class TouchControls : MonoBehaviour
         }
         TeleportPressed = tp && !tpWas;
         tpWas = tp;
+        DashPressed = dash && !dashWas; dashWas = dash;
+        FlyPressed = fly && !flyWas; flyWas = fly;
     }
 
     // ---- drawing ----
@@ -143,6 +149,8 @@ public class TouchControls : MonoBehaviour
         Button(BVolley, "VOLLEY", VolleyHeld, false);
         Button(BGuard, "GUARD", GuardHeld, false);
         if (TeleOn) Button(BTele, "TELEPORT", tpWas, false);
+        Button(BDash, Abilities.DashCooldownLeft > 0f ? "DASH " + Mathf.CeilToInt(Abilities.DashCooldownLeft) : "DASH", dashWas || Abilities.Dashing, false);
+        Button(BFly, Abilities.Flying ? "FLY " + Mathf.CeilToInt(Abilities.FlyLeft) : (Abilities.FlyCooldownLeft > 0f ? "FLY " + Mathf.CeilToInt(Abilities.FlyCooldownLeft) : "FLY"), flyWas || Abilities.Flying, false);
         GUI.matrix = m;
     }
 }
