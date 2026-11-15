@@ -68,7 +68,8 @@ public class PlayerMovement : MonoBehaviour
     void FixedUpdate()
     {
         knock = Vector2.Lerp(knock, Vector2.zero, 10f * Time.fixedDeltaTime);
-        rb.linearVelocity = (input.normalized * speed * Boosts.Move * Coop.GuestMoveMul * (Guard.Active ? Guard.MoveMul : 1f) + knock) * GS.S;
+        if (Abilities.Dashing) rb.linearVelocity = Abilities.DashDir * Abilities.DashSpeed * GS.S;
+        else rb.linearVelocity = (input.normalized * speed * Boosts.Move * Coop.GuestMoveMul * (Guard.Active ? Guard.MoveMul : 1f) * (Abilities.Flying ? Abilities.FlySpeedMul : 1f) + knock) * GS.S;
 
         // Safety net: never leave the arena, even if a collider is missed.
         if (Arena.Instance != null)

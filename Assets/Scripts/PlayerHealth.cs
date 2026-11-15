@@ -68,6 +68,7 @@ public class PlayerHealth : MonoBehaviour
     {
         if (Coop.IsGuest) return;
         if (!GameState.Active || Time.time < invulnUntil) return;
+        if (Abilities.Dashing || Abilities.Flying || Abilities.Landing) return;      // ring dash / flight: untouchable
         if (Boosts.Aegis) { Vfx.Burst(transform.position + Vector3.up * 0.4f, new Color(0.6f, 0.75f, 1f), 6, 3f, 0.1f, 0.3f); invulnUntil = Time.time + 0.2f; return; }
         if (Guard.Active)
         {

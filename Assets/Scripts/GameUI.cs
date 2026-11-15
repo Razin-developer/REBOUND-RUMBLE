@@ -286,6 +286,23 @@ public partial class GameUI : MonoBehaviour
             Rect(new Rect(gx + 41, gy + 21, 242 * Mathf.Clamp01(gk), 6), Guard.Ready ? new Color(0.45f, 0.85f, 1f) : new Color(0.8f, 0.45f, 0.1f));
         }
 
+        // ring dash + ring flight meters (same style as the guard)
+        {
+            float ax = W - 300;
+            float dk = Abilities.DashCooldownLeft <= 0f ? 1f : 1f - Abilities.DashCooldownLeft / Abilities.DashCooldown;
+            bool dr = Abilities.DashCooldownLeft <= 0f;
+            Text(new Rect(ax, H - 166, 284, 18), Abilities.Dashing ? "DASHING" : (dr ? "RING DASH READY  [SHIFT]" : "RING DASH  " + Mathf.CeilToInt(Abilities.DashCooldownLeft) + "s"), small, dr ? Gold : new Color(1, 1, 1, 0.6f), TextAnchor.MiddleRight);
+            Rect(new Rect(ax + 40, H - 146, 244, 8), new Color(0, 0, 0, 0.7f));
+            Rect(new Rect(ax + 41, H - 145, 242 * Mathf.Clamp01(dk), 6), dr ? Gold : new Color(0.8f, 0.45f, 0.1f));
+
+            bool fr = Abilities.FlyCooldownLeft <= 0f;
+            string fl = Abilities.Flying ? "FLYING  " + Abilities.FlyLeft.ToString("0.0") + "s" : (Abilities.Landing ? "FIND CLEAR GROUND" : (fr ? "RING FLIGHT READY  [CTRL]" : "RING FLIGHT  " + Mathf.CeilToInt(Abilities.FlyCooldownLeft) + "s"));
+            float fk = Abilities.Flying ? Abilities.FlyLeft / Abilities.FlyTime : (fr ? 1f : 1f - Abilities.FlyCooldownLeft / (Abilities.FlyTime + Abilities.FlyCooldown));
+            Text(new Rect(ax, H - 202, 284, 18), fl, small, (fr || Abilities.Flying) ? new Color(0.7f, 0.92f, 1f) : new Color(1, 1, 1, 0.6f), TextAnchor.MiddleRight);
+            Rect(new Rect(ax + 40, H - 182, 244, 8), new Color(0, 0, 0, 0.7f));
+            Rect(new Rect(ax + 41, H - 181, 242 * Mathf.Clamp01(fk), 6), (fr || Abilities.Flying) ? new Color(0.6f, 0.88f, 1f) : new Color(0.8f, 0.45f, 0.1f));
+        }
+
         // rune pillar teleport
         if (RunePillars.Total > 0)
         {
@@ -301,10 +318,12 @@ public partial class GameUI : MonoBehaviour
             else if (Button(br, "RUNE TELEPORT READY [T]", btnSmall)) RunePillars.Teleport();
         }
 
+        DrawChestHud(W, H);
+
         // exit direction
         if (PortalArrow.Distance > 0f)
             Text(new Rect(W / 2 - 300, H - 52, 600, 20), "EXIT PORTAL  " + Mathf.RoundToInt(PortalArrow.Distance) + "m", small, new Color(1f, 0.85f, 0.4f, 0.9f), TextAnchor.MiddleCenter);
-        Text(new Rect(W / 2 - 330, H - 30, 660, 22), "WASD MOVE   CLICK THROW   Q VOLLEY   E TELEPORT   TAB PAUSE", small, new Color(1, 1, 1, 0.5f), TextAnchor.MiddleCenter);
+        Text(new Rect(W / 2 - 330, H - 30, 660, 22), "WASD MOVE   CLICK THROW   Q VOLLEY   SHIFT DASH   CTRL FLY   TAB PAUSE", small, new Color(1, 1, 1, 0.5f), TextAnchor.MiddleCenter);
 
         if (World.NearPortal)
         {
@@ -626,8 +645,9 @@ public partial class GameUI : MonoBehaviour
             { "RIGHT CLICK / Q", "5-RING VOLLEY (LONG COOLDOWN)" },
             { "HOLD E", "GUARD - BLOCKS HITS (5s METER, REFILLS WHEN RELEASED)" },
             { "T", "TELEPORT TO A RUNE PILLAR (15s)" },
-            { "TAB", "PAUSE / CONTROLS" },
-            { "ESC", "PAUSE MENU" },
+            { "SHIFT", "RING DASH - QUICK UNTOUCHABLE RUSH (3.5s COOLDOWN)" },
+            { "CTRL", "RING FLIGHT - FLY OVER OBSTACLES 4s (10s COOLDOWN)" },
+            { "TAB / ESC", "CONTROLS / PAUSE MENU" },
             { "PORTAL / CHESTS", "WALK NEAR - NO CLICK NEEDED" },
         };
         for (int i = 0; i < rows.GetLength(0); i++)

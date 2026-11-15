@@ -106,6 +106,7 @@ public class World : MonoBehaviour
 /// <summary>Walk into it (no button needed) and stay a moment to leave the run and bank your score.</summary>
 public class Portal : MonoBehaviour
 {
+    public const float PortalHoldTime = 3.5f;      // seconds you must stand in the portal before it takes you to the menu
     public bool IsAltar { get { return existing; } }
     public Vector2 Anchor { get; private set; }     // where the exit is (centre of the altar's base / the scripted portal)
     bool existing;                                  // true when this is the map's own altar
@@ -203,7 +204,7 @@ public class Portal : MonoBehaviour
         Vector2 pp = (Vector2)player.position + new Vector2(0f, 0.4f);
         bool near = Vector2.Distance(pp, Anchor + new Vector2(0f, 0.2f)) < reach || Coop.AvatarNear(Anchor, reach, -1);
         World.NearPortal = near;
-        progress = near ? progress + Time.deltaTime / 1.2f : Mathf.Max(0f, progress - Time.deltaTime * 2f);
+        progress = near ? progress + Time.deltaTime / PortalHoldTime : Mathf.Max(0f, progress - Time.deltaTime * 1.5f);
         World.PortalProgress = progress;
         if (progress >= 1f) Use();
     }

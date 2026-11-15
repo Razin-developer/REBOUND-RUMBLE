@@ -90,6 +90,24 @@ public static class Nav
         return false;
     }
 
+    /// <summary>Which level (sorting / physics layer name) has floor under `p`: the highest raised floor tile there, else the ground level.</summary>
+    public static string FloorAt(Vector2 p)
+    {
+        string best = GameState.ActorLayer; int bestRank = 1;
+        foreach (var t in groundMaps)
+        {
+            if (t == null) continue;
+            int rank = t.name.StartsWith("Layer 3") ? 3 : (t.name.StartsWith("Layer 2") ? 2 : 0);
+            if (rank <= bestRank) continue;
+            if (!t.HasTile(t.WorldToCell(p))) continue;
+            var trr = t.GetComponent<TilemapRenderer>();
+            string ln = trr != null ? trr.sortingLayerName : t.name.Substring(0, 7);
+            if (LayerMask.NameToLayer(ln) < 0) continue;
+            best = ln; bestRank = rank;
+        }
+        return best;
+    }
+
     static bool PropBlocked(Vector2Int c, ContactFilter2D f, Collider2D[] buf)
     {
         int n = Physics2D.OverlapCircle(CenterOf(c), 0.32f, f, buf);
